@@ -27,7 +27,10 @@
  * 前提に進めています。商用サービス化や他社への提供は行わないでください。
  */
 
-const puppeteer = require('puppeteer');
+const puppeteerExtra = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+puppeteerExtra.use(StealthPlugin());
+const puppeteer = puppeteerExtra;
 const express = require('express');
 const path = require('path');
 const fetch = require('node-fetch'); // Node 18以降ならglobal fetchでも可
@@ -94,16 +97,9 @@ async function loginToSalonBoard() {
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',      // /dev/shm の容量不足によるクラッシュを防ぐ(Render等のコンテナ環境で重要)
       '--disable-gpu',                 // GPU関連の機能を無効化してメモリ節約
-      '--disable-extensions',
       '--disable-background-networking',
-      '--disable-default-apps',
-      '--disable-sync',
-      '--disable-translate',
-      '--metrics-recording-only',
-      '--mute-audio',
       '--no-first-run',
-      '--safebrowsing-disable-auto-update',
-      '--single-process'               // プロセスを分割しない(メモリ節約、ただし不安定になる場合もある)
+      '--mute-audio'
     ]
   });
 
@@ -116,19 +112,38 @@ async function loginToSalonBoard() {
   try {
     const page = await browser.newPage();
 
+    // 実在のスマホブラウザに近づけるための各種設定
     await page.setUserAgent(
-      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
     );
-    await page.setViewport({ width: 390, height: 844, isMobile: true });
+    await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
+
+    // 実ブラウザが送る一般的なHTTPヘッダーを追加
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'ja-JP,ja;q=0.9',
+    });
+
+    // タイムゾーンと言語設定も日本に合わせる
+    await page.emulateTimezone('Asia/Tokyo');
 
     console.log('ログインページにアクセス中...');
     await page.goto(LOGIN_URL, { waitUntil: 'networkidle2' });
 
+    // 人間らしい待機時間を挟む(即座に入力を開始すると機械的な挙動として検知されやすい)
+    await new Promise(resolve => setTimeout(resolve, 1500));
+
     await page.waitForSelector('input[name="userId"]');
-    await page.type('input[name="userId"]', SALON_ID, { delay: 50 });
+    await page.click('input[name="userId"]'); // まずクリックしてフォーカスを当てる(人間の操作に近づける)
+    await page.type('input[name="userId"]', SALON_ID, { delay: 80 + Math.random() * 60 });
+
+    await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 500));
 
     await page.waitForSelector('input[name="password"]');
-    await page.type('input[name="password"]', SALON_PASSWORD, { delay: 50 });
+    await page.click('input[name="password"]');
+    await page.type('input[name="password"]', SALON_PASSWORD, { delay: 80 + Math.random() * 60 });
+
+    // 入力完了後、クリックまで少し間を置く(人間らしい挙動)
+    await new Promise(resolve => setTimeout(resolve, 800 + Math.random() * 700));
 
     console.log('ログインボタンをクリック...');
     console.log('クリック前のURL: ' + page.url());
