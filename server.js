@@ -45,6 +45,11 @@ app.use('/api/publish', publishRouter);
 app.use('/api/stores', storesRouter);
 app.use('/api/stylists', stylistsRouter);
 
+// LIFF ID等、フロントエンドが必要とする軽量な設定値を返す
+app.get('/api/config', (req, res) => {
+  res.json({ liffId: process.env.LIFF_ID || null });
+});
+
 // ヘルスチェック用(Renderが生存確認に使う。念のため用意)
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
