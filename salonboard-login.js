@@ -60,7 +60,7 @@ const RENDER_BASE_URL = process.env.RENDER_EXTERNAL_URL || 'http://localhost:' +
 const LOGIN_URL = 'https://salonboard.com/login_sp/';
 
 // ===== テスト投稿用の内容(あくまでテスト。実際の運用では動的に生成する) =====
-const TEST_BLOG_TITLE = 'テスト投稿です';
+const TEST_BLOG_TITLE = 'テスト投稿';
 const TEST_BLOG_BODY = 'これは自動投稿システムのテストです。\n実際には送信せず、確認画面の一歩手前で止めています。';
 
 // ===== LINEへ画像を送る処理 =====
@@ -469,20 +469,56 @@ async function loginToSalonBoard() {
         });
         await new Promise(resolve => setTimeout(resolve, 800));
 
-        // まずPuppeteer標準クリックを試し、失敗したらfocus()+type方式にフォールバック
+        // まずPuppeteer標準クリックを試し、失敗したらJS直接入力にフォールバック
+        let titleClickSucceeded = true;
         try {
           await page.click('#blogTitle');
           console.log('#blogTitle: 標準クリックに成功しました。');
         } catch (clickError) {
-          console.log('#blogTitle: 標準クリックに失敗(' + clickError.message + ')。focus方式にフォールバックします。');
-          await page.evaluate(() => {
-            const el = document.querySelector('#blogTitle');
-            if (el) el.focus();
-          });
+          titleClickSucceeded = false;
+          console.log('#blogTitle: 標準クリックに失敗(' + clickError.message + ')。JS直接入力方式にフォールバックします。');
         }
-        await page.type('#blogTitle', TEST_BLOG_TITLE, { delay: 60 + Math.random() * 40 });
+
+        if (titleClickSucceeded) {
+          await page.type('#blogTitle', TEST_BLOG_TITLE, { delay: 60 + Math.random() * 40 });
+        } else {
+          await page.evaluate((text) => {
+            const el = document.querySelector('#blogTitle');
+            if (el) {
+              el.focus();
+              el.value = text;
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+            }
+          }, TEST_BLOG_TITLE);
+          console.log('#blogTitle: JS直接入力で値をセットしました。');
+        }
 
         await new Promise(resolve => setTimeout(resolve, 400 + Math.random() * 400));
+
+        // 診断: #blogContents 要素の実際の状態を詳しく調べる
+        const contentsElState = await page.evaluate(() => {
+          const el = document.querySelector('#blogContents');
+          if (!el) return { exists: false };
+          const rect = el.getBoundingClientRect();
+          const style = window.getComputedStyle(el);
+          return {
+            exists: true,
+            rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+            disabled: el.disabled,
+            readOnly: el.readOnly,
+            display: style.display,
+            visibility: style.visibility,
+            opacity: style.opacity,
+            pointerEvents: style.pointerEvents,
+            elementAtPoint: (() => {
+              const topEl = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+              return topEl ? { tag: topEl.tagName, id: topEl.id, className: topEl.className } : null;
+            })()
+          };
+        }).catch(e => ({ error: e.message }));
+        console.log('#blogContents の状態: ' + JSON.stringify(contentsElState));
 
         await page.evaluate(() => {
           const el = document.querySelector('#blogContents');
@@ -490,17 +526,33 @@ async function loginToSalonBoard() {
         });
         await new Promise(resolve => setTimeout(resolve, 800));
 
+        let contentsClickSucceeded = true;
         try {
           await page.click('#blogContents');
           console.log('#blogContents: 標準クリックに成功しました。');
         } catch (clickError) {
-          console.log('#blogContents: 標準クリックに失敗(' + clickError.message + ')。focus方式にフォールバックします。');
-          await page.evaluate(() => {
-            const el = document.querySelector('#blogContents');
-            if (el) el.focus();
-          });
+          contentsClickSucceeded = false;
+          console.log('#blogContents: 標準クリックに失敗(' + clickError.message + ')。JS直接入力方式にフォールバックします。');
         }
-        await page.type('#blogContents', TEST_BLOG_BODY, { delay: 40 + Math.random() * 30 });
+
+        if (contentsClickSucceeded) {
+          // クリックが成功した場合のみ page.type を使う(type内部でも要素をクリックするため)
+          await page.type('#blogContents', TEST_BLOG_BODY, { delay: 40 + Math.random() * 30 });
+        } else {
+          // クリックできない場合は、JSで直接値をセットし、
+          // Reactやフレームワーク側の変更検知イベントも発火させる
+          await page.evaluate((text) => {
+            const el = document.querySelector('#blogContents');
+            if (el) {
+              el.focus();
+              el.value = text;
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+            }
+          }, TEST_BLOG_BODY);
+          console.log('#blogContents: JS直接入力で値をセットしました。');
+        }
 
         console.log('タイトル・本文の入力が完了しました。');
 
