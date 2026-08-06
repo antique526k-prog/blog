@@ -233,7 +233,7 @@ async function loginToSalonBoard() {
     }).catch(() => '(本文の取得に失敗しました)');
     console.log('ページ本文の冒頭300文字: ' + bodyText);
 
-    // スクリーンショットをファイル名にタイムスタンプを付けて保存
+    // スクリーンショットをファイル名にタイムスタンプを付けて保存(ログイン後の画面)
     const fileName = `after_login_${Date.now()}.png`;
     const filePath = path.join(SCREENSHOT_DIR, fileName);
     await page.screenshot({ path: filePath, fullPage: true });
@@ -245,6 +245,68 @@ async function loginToSalonBoard() {
     const imageUrl = `${RENDER_BASE_URL}/screenshots/${fileName}`;
     console.log('画像の公開URL: ' + imageUrl);
     await sendImageToLine(imageUrl);
+
+    // ===== ここからブログボタンへの遷移を試みる =====
+    console.log('ブログボタンを探しています...');
+
+    // 「ブログ」というテキストを含むリンク/ボタンを探す
+    const blogButtonInfo = await page.evaluate(() => {
+      // aタグ、buttonタグ、その他クリック可能そうな要素すべてから探す
+      const candidates = Array.from(document.querySelectorAll('a, button, div[onclick], span[onclick]'));
+      const blogEl = candidates.find(el => el.textContent.trim() === 'ブログ');
+      if (blogEl) {
+        return {
+          found: true,
+          tag: blogEl.tagName,
+          href: blogEl.getAttribute('href'),
+          onclick: blogEl.getAttribute('onclick'),
+          id: blogEl.id,
+          className: blogEl.className
+        };
+      }
+      return { found: false };
+    });
+    console.log('ブログボタンの検出結果: ' + JSON.stringify(blogButtonInfo));
+
+    if (blogButtonInfo.found) {
+      // 目印を付けてクリック(ログインボタンと同じ確実な方式)
+      await page.evaluate(() => {
+        const candidates = Array.from(document.querySelectorAll('a, button, div[onclick], span[onclick]'));
+        const blogEl = candidates.find(el => el.textContent.trim() === 'ブログ');
+        if (blogEl) blogEl.setAttribute('data-auto-blog-target', 'true');
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 500));
+
+      await page.click('[data-auto-blog-target="true"]');
+      console.log('ブログボタンをクリックしました。');
+
+      // 遷移を待つ
+      await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {
+        console.log('ブログページへの遷移検知がタイムアウトしました。');
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      console.log('ブログページのURL: ' + page.url());
+
+      const blogBodyText = await page.evaluate(() => {
+        return document.body ? document.body.innerText.slice(0, 500) : '(bodyが存在しません)';
+      }).catch(() => '(本文の取得に失敗しました)');
+      console.log('ブログページ本文の冒頭500文字: ' + blogBodyText);
+
+      // ブログページのスクリーンショットも保存してLINEに送信
+      const blogFileName = `blog_page_${Date.now()}.png`;
+      const blogFilePath = path.join(SCREENSHOT_DIR, blogFileName);
+      await page.screenshot({ path: blogFilePath, fullPage: true });
+      console.log('ブログページのスクリーンショットを保存: ' + blogFilePath);
+
+      const blogImageUrl = `${RENDER_BASE_URL}/screenshots/${blogFileName}`;
+      await sendImageToLine(blogImageUrl);
+      console.log('ブログページの画像をLINEに送信しました。');
+    } else {
+      console.log('ブログボタンが見つかりませんでした。ページ構造を再確認する必要があります。');
+    }
 
   } catch (error) {
     console.error('エラーが発生しました: ' + error.message);
