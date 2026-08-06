@@ -89,8 +89,29 @@ async function loginToSalonBoard() {
 
   const browser = await puppeteer.launch({
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',      // /dev/shm の容量不足によるクラッシュを防ぐ(Render等のコンテナ環境で重要)
+      '--disable-gpu',                 // GPU関連の機能を無効化してメモリ節約
+      '--disable-extensions',
+      '--disable-background-networking',
+      '--disable-default-apps',
+      '--disable-sync',
+      '--disable-translate',
+      '--metrics-recording-only',
+      '--mute-audio',
+      '--no-first-run',
+      '--safebrowsing-disable-auto-update',
+      '--single-process'               // プロセスを分割しない(メモリ節約、ただし不安定になる場合もある)
+    ]
   });
+
+  // 定期的にメモリ使用量をログに出す(クラッシュする直前の状況を把握するため)
+  const memoryLogInterval = setInterval(() => {
+    const used = process.memoryUsage();
+    console.log(`[メモリ監視] RSS: ${Math.round(used.rss / 1024 / 1024)}MB / Heap: ${Math.round(used.heapUsed / 1024 / 1024)}MB`);
+  }, 2000);
 
   try {
     const page = await browser.newPage();
@@ -174,7 +195,10 @@ async function loginToSalonBoard() {
   } catch (error) {
     console.error('エラーが発生しました: ' + error.message);
   } finally {
-    await browser.close();
+    clearInterval(memoryLogInterval);
+    await browser.close().catch(() => {
+      console.log('ブラウザは既に閉じられていました。');
+    });
   }
 }
 
