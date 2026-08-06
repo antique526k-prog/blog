@@ -625,10 +625,11 @@ async function loginToSalonBoard() {
           }).catch(() => '(本文の取得に失敗しました)');
           console.log('確認画面の本文: ' + confirmBodyText);
 
-          // 確認画面にある「投稿する」ボタンの情報だけ取得しておく(まだクリックしない)
-          const submitButtonInfo = await page.evaluate(() => {
+          // 確認画面にある「登録・未反映にする」ボタンを探してクリックする
+          // (「登録・反映する」は即座に一般公開されるため、安全のためこちらは使わない)
+          const draftButtonInfo = await page.evaluate(() => {
             const candidates = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"], div[onclick], span[onclick]'));
-            const btn = candidates.find(el => (el.textContent || el.value || '').trim().includes('投稿する'));
+            const btn = candidates.find(el => (el.textContent || el.value || '').trim() === '登録・未反映にする');
             if (btn) {
               return {
                 found: true,
@@ -640,16 +641,56 @@ async function loginToSalonBoard() {
             }
             return { found: false };
           });
-          console.log('「投稿する」ボタンの検出結果(まだクリックしていません): ' + JSON.stringify(submitButtonInfo));
+          console.log('「登録・未反映にする」ボタンの検出結果: ' + JSON.stringify(draftButtonInfo));
 
-          // 確認画面のスクリーンショットをLINEに送信
+          // 確認画面のスクリーンショットをLINEに送信(ボタンを押す前の状態)
           const confirmFileName = `confirm_page_${Date.now()}.png`;
           const confirmFilePath = path.join(SCREENSHOT_DIR, confirmFileName);
           await page.screenshot({ path: confirmFilePath, fullPage: true });
 
           const confirmImageUrl = `${RENDER_BASE_URL}/screenshots/${confirmFileName}`;
           await sendImageToLine(confirmImageUrl);
-          console.log('確認画面の画像をLINEに送信しました。ここで処理を停止します(投稿はしていません)。');
+          console.log('確認画面の画像をLINEに送信しました。');
+
+          // ===== ここで初めて「登録・未反映にする」をクリックする =====
+          // 「登録・反映する」ボタンは絶対にクリックしない(即座に一般公開されてしまうため)
+          if (draftButtonInfo.found) {
+            console.log('「登録・未反映にする」ボタンをクリックします...');
+
+            await page.evaluate(() => {
+              const candidates = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"], div[onclick], span[onclick]'));
+              const btn = candidates.find(el => (el.textContent || el.value || '').trim() === '登録・未反映にする');
+              if (btn) btn.setAttribute('data-auto-draft-target', 'true');
+            });
+
+            await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 500));
+
+            await page.click('[data-auto-draft-target="true"]');
+            console.log('「登録・未反映にする」ボタンをクリックしました。');
+
+            await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {
+              console.log('登録後ページへの遷移検知(waitForNavigation)がタイムアウトしました。安定待ちに切り替えます。');
+            });
+
+            await waitForPageStable(page);
+
+            console.log('登録後のURL: ' + page.url());
+
+            const afterSubmitBodyText = await page.evaluate(() => {
+              return document.body ? document.body.innerText.slice(0, 500) : '(bodyが存在しません)';
+            }).catch(() => '(本文の取得に失敗しました)');
+            console.log('登録後のページ本文: ' + afterSubmitBodyText);
+
+            const afterSubmitFileName = `after_draft_submit_${Date.now()}.png`;
+            const afterSubmitFilePath = path.join(SCREENSHOT_DIR, afterSubmitFileName);
+            await page.screenshot({ path: afterSubmitFilePath, fullPage: true });
+
+            const afterSubmitImageUrl = `${RENDER_BASE_URL}/screenshots/${afterSubmitFileName}`;
+            await sendImageToLine(afterSubmitImageUrl);
+            console.log('登録完了後の画面をLINEに送信しました。(未反映状態での保存が完了しているはずです)');
+          } else {
+            console.log('「登録・未反映にする」ボタンが見つかりませんでした。');
+          }
         } else {
           console.log('「確認する」ボタンが見つかりませんでした。');
         }
