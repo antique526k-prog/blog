@@ -438,10 +438,23 @@ async function loginToSalonBoard() {
         // ===== タイトル・本文を自動入力する(テスト用の内容) =====
         console.log('タイトル・本文を入力します...');
 
+        // クリック前に要素を画面内にスクロールしてから操作する(not clickableエラー対策)
+        await page.evaluate(() => {
+          const el = document.querySelector('#blogTitle');
+          if (el) el.scrollIntoView({ block: 'center' });
+        });
+        await new Promise(resolve => setTimeout(resolve, 500));
+
         await page.click('#blogTitle');
         await page.type('#blogTitle', TEST_BLOG_TITLE, { delay: 60 + Math.random() * 40 });
 
         await new Promise(resolve => setTimeout(resolve, 400 + Math.random() * 400));
+
+        await page.evaluate(() => {
+          const el = document.querySelector('#blogContents');
+          if (el) el.scrollIntoView({ block: 'center' });
+        });
+        await new Promise(resolve => setTimeout(resolve, 500));
 
         await page.click('#blogContents');
         await page.type('#blogContents', TEST_BLOG_BODY, { delay: 40 + Math.random() * 30 });
