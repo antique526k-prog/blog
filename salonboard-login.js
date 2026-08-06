@@ -59,6 +59,10 @@ const RENDER_BASE_URL = process.env.RENDER_EXTERNAL_URL || 'http://localhost:' +
 
 const LOGIN_URL = 'https://salonboard.com/login_sp/';
 
+// ===== テスト投稿用の内容(あくまでテスト。実際の運用では動的に生成する) =====
+const TEST_BLOG_TITLE = 'テスト投稿です';
+const TEST_BLOG_BODY = 'これは自動投稿システムのテストです。\n実際には送信せず、確認画面の一歩手前で止めています。';
+
 // ===== LINEへ画像を送る処理 =====
 async function sendImageToLine(imageUrl) {
   if (!LINE_CHANNEL_TOKEN || !LINE_USER_ID) {
@@ -370,6 +374,135 @@ async function loginToSalonBoard() {
         const newPostImageUrl = `${RENDER_BASE_URL}/screenshots/${newPostFileName}`;
         await sendImageToLine(newPostImageUrl);
         console.log('新規投稿フォームの画像をLINEに送信しました。');
+
+        // ===== 投稿者・カテゴリのプルダウンの選択肢を取得 =====
+        const dropdownOptions = await page.evaluate(() => {
+          function getOptions(selector) {
+            const select = document.querySelector(selector);
+            if (!select) return null;
+            return Array.from(select.options).map(opt => ({
+              value: opt.value,
+              text: opt.textContent.trim()
+            }));
+          }
+          return {
+            stylist: getOptions('select[name="stylistId"]'),
+            category: getOptions('select[name="blogCategoryCd"]')
+          };
+        });
+        console.log('投稿者の選択肢: ' + JSON.stringify(dropdownOptions.stylist, null, 2));
+        console.log('カテゴリの選択肢: ' + JSON.stringify(dropdownOptions.category, null, 2));
+
+        // ===== タイトル・本文を自動入力する(テスト用の内容) =====
+        console.log('タイトル・本文を入力します...');
+
+        await page.click('#blogTitle');
+        await page.type('#blogTitle', TEST_BLOG_TITLE, { delay: 60 + Math.random() * 40 });
+
+        await new Promise(resolve => setTimeout(resolve, 400 + Math.random() * 400));
+
+        await page.click('#blogContents');
+        await page.type('#blogContents', TEST_BLOG_BODY, { delay: 40 + Math.random() * 30 });
+
+        console.log('タイトル・本文の入力が完了しました。');
+
+        // 投稿者・カテゴリは、1つ目以外の実在する選択肢があれば適当に選んでおく
+        // (プルダウンの構造を確認するためのテストなので、実際の値は後で調整する)
+        if (dropdownOptions.stylist && dropdownOptions.stylist.length > 1) {
+          const stylistValue = dropdownOptions.stylist[1].value;
+          await page.select('select[name="stylistId"]', stylistValue);
+          console.log('投稿者を選択しました: ' + dropdownOptions.stylist[1].text);
+        }
+        if (dropdownOptions.category && dropdownOptions.category.length > 1) {
+          const categoryValue = dropdownOptions.category[1].value;
+          await page.select('select[name="blogCategoryCd"]', categoryValue);
+          console.log('カテゴリを選択しました: ' + dropdownOptions.category[1].text);
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // 入力後の状態をスクリーンショットで確認(まだ「確認する」は押さない)
+        const filledFormFileName = `filled_form_${Date.now()}.png`;
+        const filledFormFilePath = path.join(SCREENSHOT_DIR, filledFormFileName);
+        await page.screenshot({ path: filledFormFilePath, fullPage: true });
+
+        const filledFormImageUrl = `${RENDER_BASE_URL}/screenshots/${filledFormFileName}`;
+        await sendImageToLine(filledFormImageUrl);
+        console.log('入力済みフォームの画像をLINEに送信しました。まだ送信(確認するボタン)は押していません。');
+
+        // ===== 「確認する」ボタンをクリック =====
+        // 注意: これは確認画面への遷移のみ。実際の投稿(「投稿する」ボタン)はまだ押さない。
+        console.log('「確認する」ボタンを探しています...');
+
+        const confirmButtonInfo = await page.evaluate(() => {
+          const candidates = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"], div[onclick], span[onclick]'));
+          const btn = candidates.find(el => (el.textContent || el.value || '').trim() === '確認する');
+          if (btn) {
+            return {
+              found: true,
+              tag: btn.tagName,
+              type: btn.type || null,
+              onclick: btn.getAttribute('onclick')
+            };
+          }
+          return { found: false };
+        });
+        console.log('「確認する」ボタンの検出結果: ' + JSON.stringify(confirmButtonInfo));
+
+        if (confirmButtonInfo.found) {
+          await page.evaluate(() => {
+            const candidates = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"], div[onclick], span[onclick]'));
+            const btn = candidates.find(el => (el.textContent || el.value || '').trim() === '確認する');
+            if (btn) btn.setAttribute('data-auto-confirm-target', 'true');
+          });
+
+          await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 500));
+
+          await page.click('[data-auto-confirm-target="true"]');
+          console.log('「確認する」ボタンをクリックしました。');
+
+          await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {
+            console.log('確認画面への遷移検知がタイムアウトしました。');
+          });
+
+          await new Promise(resolve => setTimeout(resolve, 2000));
+
+          console.log('確認画面のURL: ' + page.url());
+
+          // 確認画面の本文を取得(バリデーションエラーが出ていないかもここで分かる)
+          const confirmBodyText = await page.evaluate(() => {
+            return document.body ? document.body.innerText.slice(0, 800) : '(bodyが存在しません)';
+          }).catch(() => '(本文の取得に失敗しました)');
+          console.log('確認画面の本文: ' + confirmBodyText);
+
+          // 確認画面にある「投稿する」ボタンの情報だけ取得しておく(まだクリックしない)
+          const submitButtonInfo = await page.evaluate(() => {
+            const candidates = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"], div[onclick], span[onclick]'));
+            const btn = candidates.find(el => (el.textContent || el.value || '').trim().includes('投稿する'));
+            if (btn) {
+              return {
+                found: true,
+                tag: btn.tagName,
+                type: btn.type || null,
+                name: btn.name || null,
+                onclick: btn.getAttribute('onclick')
+              };
+            }
+            return { found: false };
+          });
+          console.log('「投稿する」ボタンの検出結果(まだクリックしていません): ' + JSON.stringify(submitButtonInfo));
+
+          // 確認画面のスクリーンショットをLINEに送信
+          const confirmFileName = `confirm_page_${Date.now()}.png`;
+          const confirmFilePath = path.join(SCREENSHOT_DIR, confirmFileName);
+          await page.screenshot({ path: confirmFilePath, fullPage: true });
+
+          const confirmImageUrl = `${RENDER_BASE_URL}/screenshots/${confirmFileName}`;
+          await sendImageToLine(confirmImageUrl);
+          console.log('確認画面の画像をLINEに送信しました。ここで処理を停止します(投稿はしていません)。');
+        } else {
+          console.log('「確認する」ボタンが見つかりませんでした。');
+        }
       } else {
         console.log('新規投稿ボタンが見つかりませんでした。');
       }
