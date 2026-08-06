@@ -1,0 +1,14 @@
+{
+  "name": "salonboard-automation",
+  "version": "1.0.0",
+  "description": "SalonBoard自動ログイン・投稿システム(自社利用限定)",
+  "main": "salonboard-login.js",
+  "scripts": {
+    "start": "node salonboard-login.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "node-fetch": "^2.7.0",
+    "puppeteer": "^22.0.0"
+  }
+}
