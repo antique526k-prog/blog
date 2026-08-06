@@ -131,15 +131,43 @@ async function loginToSalonBoard() {
     await page.type('input[name="password"]', SALON_PASSWORD, { delay: 50 });
 
     console.log('ログインボタンをクリック...');
-    await page.evaluate(() => {
+    console.log('クリック前のURL: ' + page.url());
+
+    // クリック前に、ボタンが本当に存在し、クリック可能かを確認する
+    const buttonFound = await page.evaluate(() => {
       const links = Array.from(document.querySelectorAll('a'));
       const loginLink = links.find(a => a.textContent.trim() === 'ログイン');
-      if (loginLink) {
-        loginLink.click();
-      } else {
-        throw new Error('ログインボタンが見つかりませんでした');
-      }
+      return {
+        found: !!loginLink,
+        onclick: loginLink ? loginLink.getAttribute('onclick') : null,
+        visible: loginLink ? (loginLink.offsetWidth > 0 && loginLink.offsetHeight > 0) : false
+      };
     });
+    console.log('ログインボタンの検出結果: ' + JSON.stringify(buttonFound));
+
+    if (!buttonFound.found) {
+      throw new Error('ログインボタンがページ内に見つかりませんでした');
+    }
+
+    // Puppeteer標準のクリック方式を使う(座標クリックなので実際のユーザー操作に近い)
+    // まずテキストからXPathで要素を特定する
+    const [loginButton] = await page.$x("//a[contains(text(), 'ログイン') and not(contains(text(), 'ID')) and not(contains(text(), 'パスワード'))]");
+    if (loginButton) {
+      await loginButton.click();
+      console.log('Puppeteer標準クリックでボタンを押しました。');
+    } else {
+      // 見つからない場合は従来のJS click()にフォールバック
+      console.log('XPathでの検出に失敗。JS click()にフォールバックします。');
+      await page.evaluate(() => {
+        const links = Array.from(document.querySelectorAll('a'));
+        const loginLink = links.find(a => a.textContent.trim() === 'ログイン');
+        if (loginLink) loginLink.click();
+      });
+    }
+
+    // クリック直後、少し待ってからURLを確認(即座に変化するとは限らないため)
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    console.log('クリック2秒後のURL: ' + page.url());
 
     await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {
       console.log('画面遷移の検知がタイムアウトしました。安定するまで確認を繰り返します。');
