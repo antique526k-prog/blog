@@ -1,10 +1,10 @@
 {
-  "name": "salonboard-automation",
+  "name": "hair-pocket-publish-integration",
   "version": "1.0.0",
-  "description": "SalonBoard自動ログイン・投稿システム(自社利用限定)",
-  "main": "salonboard-login.js",
+  "description": "スタイル分析・ブログ生成・GBP/WordPress/SalonBoard同時投稿システム(自社利用限定)",
+  "main": "server.js",
   "scripts": {
-    "start": "node salonboard-login.js",
+    "start": "node server.js",
     "postinstall": "node install-fonts.js"
   },
   "dependencies": {
@@ -12,6 +12,11 @@
     "node-fetch": "^2.7.0",
     "puppeteer": "^22.0.0",
     "puppeteer-extra": "^3.3.6",
-    "puppeteer-extra-plugin-stealth": "^2.11.2"
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "google-spreadsheet": "^4.1.4",
+    "google-auth-library": "^9.14.1",
+    "dotenv": "^16.4.5",
+    "multer": "^1.4.5-lts.1",
+    "cors": "^2.8.5"
   }
 }

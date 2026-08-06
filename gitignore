@@ -1,0 +1,8 @@
+node_modules/
+.env
+screenshots/*.png
+!screenshots/.gitkeep
+*.log
+.DS_Store
+test-upload-image.jpg
+.fonts/
