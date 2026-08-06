@@ -685,8 +685,9 @@ async function loginToSalonBoard() {
             console.log('「確認する」ボタンの標準クリックに失敗: ' + clickError.message);
           }
 
-          // 標準クリックが「成功」と表示されても実際には反応しない場合があるため、
-          // 念のため座標ベースの物理的なマウスクリックも追加で実行する
+          // このボタンは touchstart/touchmove/touchend イベントにのみ反応する
+          // (スマホ版サイト特有の実装)ため、マウスクリックではなく
+          // タッチイベントを明示的にシミュレートする必要がある。
           const btnRect = await page.evaluate(() => {
             const el = document.querySelector('[data-auto-confirm-target="true"]');
             if (!el) return null;
@@ -695,9 +696,30 @@ async function loginToSalonBoard() {
           });
 
           if (btnRect) {
-            console.log(`座標ベースのマウスクリックを実行します: (${btnRect.x}, ${btnRect.y})`);
-            await page.mouse.click(btnRect.x, btnRect.y);
-            console.log('座標ベースのマウスクリックを実行しました。');
+            console.log(`タッチイベントをシミュレートします: (${btnRect.x}, ${btnRect.y})`);
+            try {
+              await page.touchscreen.tap(btnRect.x, btnRect.y);
+              console.log('page.touchscreen.tap() を実行しました。');
+            } catch (touchError) {
+              console.log('page.touchscreen.tap() に失敗: ' + touchError.message);
+
+              // フォールバック: CDP(Chrome DevTools Protocol)を直接使ってタッチイベントを発火
+              try {
+                const client = await page.target().createCDPSession();
+                await client.send('Input.dispatchTouchEvent', {
+                  type: 'touchStart',
+                  touchPoints: [{ x: btnRect.x, y: btnRect.y }]
+                });
+                await new Promise(resolve => setTimeout(resolve, 100));
+                await client.send('Input.dispatchTouchEvent', {
+                  type: 'touchEnd',
+                  touchPoints: []
+                });
+                console.log('CDP経由でのタッチイベント発火に成功しました。');
+              } catch (cdpError) {
+                console.log('CDP経由でのタッチイベント発火にも失敗: ' + cdpError.message);
+              }
+            }
           } else {
             console.log('ボタンの座標が取得できませんでした。');
           }
