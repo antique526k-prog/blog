@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>スタイル分析 & ブログ生成</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
+    background: #F7F3F1;
+    margin: 0;
+    padding: 16px;
+    color: #2C2C2A;
+  }
+  .card {
+    background: #FFFFFF;
+    border-radius: 16px;
+    border: 1px solid #E8E1DD;
+    overflow: hidden;
+    max-width: 420px;
+    margin: 0 auto;
+  }
+  .header {
+    padding: 14px 16px 12px;
+    border-bottom: 1px solid #E8E1DD;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .header p.title { font-size: 15px; font-weight: 600; margin: 0; }
+  .header p.sub { font-size: 12px; color: #8A8580; margin: 2px 0 0; }
+  .badge {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: #FBEAF0; display: flex; align-items: center; justify-content: center;
+    font-size: 16px;
+  }
+  .section { padding: 16px; }
+  .label { font-size: 12px; font-weight: 600; color: #6B6560; margin: 0 0 6px; }
+  select, textarea {
+    width: 100%;
+    border: 1px solid #DDD5D0;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 14px;
+    font-family: inherit;
+    background: #fff;
+  }
+  select { height: 40px; margin-bottom: 16px; }
+  select:disabled { background: #F3EEEA; color: #B0A9A2; }
+  .upload-box {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 6px; border: 1.5px dashed #C9BFB8; border-radius: 12px;
+    padding: 22px 12px; margin-bottom: 16px; cursor: pointer;
+    text-align: center;
+  }
+  .upload-box img { max-width: 100%; max-height: 160px; border-radius: 8px; }
+  .upload-box span { font-size: 13px; color: #8A8580; }
+  .age-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 20px;
+  }
+  .age-btn {
+    height: 38px; border-radius: 8px; border: 1px solid #DDD5D0;
+    background: #fff; font-size: 13px; cursor: pointer;
+  }
+  .age-btn.selected {
+    background: #FBEAF0; border-color: #D4537E; color: #72243E; font-weight: 600;
+  }
+  .primary-btn {
+    width: 100%; height: 42px; border: none; border-radius: 8px;
+    background: #993556; color: #FBEAF0; font-size: 14px; font-weight: 600;
+    cursor: pointer;
+  }
+  .primary-btn:disabled { opacity: 0.5; }
+  .tabs {
+    display: flex; background: #F3EEEA; border-radius: 8px; padding: 3px; margin-bottom: 16px;
+  }
+  .tab-btn {
+    flex: 1; border: none; background: transparent; height: 32px; border-radius: 6px;
+    font-size: 13px; font-weight: 600; color: #8A8580; cursor: pointer;
+  }
+  .tab-btn.active { background: #fff; color: #2C2C2A; }
+  #panelAnalysis {
+    white-space: pre-wrap;
+    font-size: 13px;
+    line-height: 1.8;
+    color: #4A4540;
+  }
+  textarea { min-height: 160px; line-height: 1.7; resize: vertical; }
+  .action-row { display: flex; gap: 8px; margin-top: 12px; }
+  .secondary-btn {
+    flex: 1; height: 38px; border-radius: 8px; border: 1px solid #DDD5D0;
+    background: #fff; font-size: 13px; cursor: pointer;
+  }
+  .result-btn { flex: 1; height: 38px; border: none; border-radius: 8px; background: #993556; color: #FBEAF0; font-size: 13px; font-weight: 600; cursor: pointer; }
+  #resultSection { display: none; border-top: 1px solid #E8E1DD; padding: 16px; }
+  #statusMsg { font-size: 13px; text-align: center; margin-top: 10px; color: #8A8580; }
+  .stylist-hint { font-size: 11px; color: #8A8580; margin: -12px 0 16px; }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <div class="header">
+    <div>
+      <p class="title">スタイル分析 &amp; ブログ生成</p>
+      <p class="sub">裏ジェス</p>
+    </div>
+    <div class="badge">✂️</div>
+  </div>
+
+  <div class="section">
+    <p class="label">店舗</p>
+    <select id="storeSelect"></select>
+
+    <p class="label">スタイル写真</p>
+    <label class="upload-box" id="uploadBox" for="photoInput">
+      <span id="uploadHint">タップして写真を選択</span>
+      <img id="previewImg" style="display:none;">
+    </label>
+    <input type="file" id="photoInput" accept="image/*" style="display:none;">
+
+    <p class="label">お客様の年代</p>
+    <div class="age-grid" id="ageGrid">
+      <button type="button" class="age-btn" data-age="10-20">10代〜20代</button>
+      <button type="button" class="age-btn" data-age="30">30代</button>
+      <button type="button" class="age-btn" data-age="40">40代</button>
+      <button type="button" class="age-btn" data-age="50">50代〜</button>
+    </div>
+
+    <button type="button" class="primary-btn" id="generateBtn">生成する</button>
+    <p id="statusMsg"></p>
+  </div>
+
+  <div id="resultSection">
+    <div class="tabs">
+      <button type="button" class="tab-btn active" data-tab="analysis">分析</button>
+      <button type="button" class="tab-btn" data-tab="blog">ブログ文案</button>
+    </div>
+
+    <div id="panelAnalysis"></div>
+
+    <div id="panelBlog" style="display:none;">
+      <textarea id="blogText"></textarea>
+
+      <p class="label" style="margin-top:16px;">SalonBoard投稿者</p>
+      <select id="stylistSelect" disabled>
+        <option value="">店舗を選択すると表示されます</option>
+      </select>
+      <p class="stylist-hint" id="stylistHint"></p>
+
+      <div class="action-row">
+        <button type="button" class="secondary-btn" id="copyBtn">コピー</button>
+        <button type="button" class="result-btn" id="publishBtn">投稿する</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script>
+  var currentImage = { base64: null, mimeType: null };
+  var selectedAge = null;
+  var LIFF_ID = null; // サーバーから取得する
+
+  // ===== 初期化: LIFF ID・店舗一覧を取得 =====
+  async function init() {
+    try {
+      const res = await fetch('/api/config');
+      const data = await res.json();
+      LIFF_ID = data.liffId;
+      if (LIFF_ID) {
+        liff.init({ liffId: LIFF_ID }).catch(function (err) {
+          console.error('LIFF init error', err);
+        });
+      }
+    } catch (e) {
+      console.error('設定取得エラー', e);
+    }
+
+    await loadStores();
+  }
+
+  async function loadStores() {
+    const res = await fetch('/api/stores');
+    const data = await res.json();
+    const select = document.getElementById('storeSelect');
+    select.innerHTML = '';
+    data.stores.forEach(function (store) {
+      const opt = document.createElement('option');
+      opt.value = store.id;
+      opt.textContent = store.name;
+      select.appendChild(opt);
+    });
+    // 初期表示の店舗で投稿者一覧も読み込んでおく
+    if (data.stores.length > 0) {
+      loadStylists(data.stores[0].id);
+    }
+  }
+
+  document.getElementById('storeSelect').addEventListener('change', function () {
+    loadStylists(this.value);
+  });
+
+  // ===== 投稿者一覧を取得(キャッシュがあれば高速、無ければSalonBoardへの初回アクセスで少し時間がかかる) =====
+  async function loadStylists(storeId) {
+    const select = document.getElementById('stylistSelect');
+    const hint = document.getElementById('stylistHint');
+    select.disabled = true;
+    select.innerHTML = '<option value="">読み込み中…</option>';
+    hint.textContent = '';
+
+    try {
+      const res = await fetch('/api/stylists/' + encodeURIComponent(storeId));
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+
+      select.innerHTML = '';
+      data.stylists.forEach(function (s) {
+        const opt = document.createElement('option');
+        opt.value = s.value;
+        opt.textContent = s.text;
+        select.appendChild(opt);
+      });
+      select.disabled = false;
+      hint.textContent = data.source === 'cache' ? '' : '最新の投稿者一覧を取得しました';
+    } catch (e) {
+      select.innerHTML = '<option value="">取得に失敗しました</option>';
+      hint.textContent = 'エラー: ' + e.message;
+    }
+  }
+
+  document.getElementById('photoInput').addEventListener('change', function (e) {
+    var file = e.target.files[0];
+    if (!file) return;
+    resizeAndEncode(file, function (base64, mimeType) {
+      currentImage.base64 = base64;
+      currentImage.mimeType = mimeType;
+      var img = document.getElementById('previewImg');
+      img.src = 'data:' + mimeType + ';base64,' + base64;
+      img.style.display = 'block';
+      document.getElementById('uploadHint').style.display = 'none';
+    });
+  });
+
+  function resizeAndEncode(file, callback) {
+    var reader = new FileReader();
+    reader.onload = function (event) {
+      var img = new Image();
+      img.onload = function () {
+        var maxWidth = 1280;
+        var scale = Math.min(1, maxWidth / img.width);
+        var canvas = document.createElement('canvas');
+        canvas.width = img.width * scale;
+        canvas.height = img.height * scale;
+        var ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        var dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        var base64 = dataUrl.split(',')[1];
+        callback(base64, 'image/jpeg');
+      };
+      img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  document.querySelectorAll('.age-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.querySelectorAll('.age-btn').forEach(function (b) { b.classList.remove('selected'); });
+      btn.classList.add('selected');
+      selectedAge = btn.getAttribute('data-age');
+    });
+  });
+
+  document.getElementById('generateBtn').addEventListener('click', async function () {
+    var statusMsg = document.getElementById('statusMsg');
+    if (!currentImage.base64) {
+      statusMsg.textContent = '写真を選択してください';
+      return;
+    }
+    if (!selectedAge) {
+      statusMsg.textContent = '年代を選択してください';
+      return;
+    }
+
+    var btn = document.getElementById('generateBtn');
+    btn.disabled = true;
+    statusMsg.textContent = '生成中です…（30秒ほどかかります）';
+
+    try {
+      const res = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          storeId: document.getElementById('storeSelect').value,
+          ageGroup: selectedAge,
+          mimeType: currentImage.mimeType,
+          imageBase64: currentImage.base64,
+        }),
+      });
+      const result = await res.json();
+      btn.disabled = false;
+
+      if (!result.success) {
+        statusMsg.textContent = '生成に失敗しました: ' + result.error;
+        return;
+      }
+      statusMsg.textContent = '';
+      document.getElementById('resultSection').style.display = 'block';
+      document.getElementById('panelAnalysis').textContent = result.analysisText;
+      document.getElementById('blogText').value = result.blogText;
+    } catch (err) {
+      btn.disabled = false;
+      statusMsg.textContent = 'エラーが発生しました: ' + err.message;
+    }
+  });
+
+  document.querySelectorAll('.tab-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      var tab = btn.getAttribute('data-tab');
+      document.getElementById('panelAnalysis').style.display = tab === 'analysis' ? 'block' : 'none';
+      document.getElementById('panelBlog').style.display = tab === 'blog' ? 'block' : 'none';
+    });
+  });
+
+  document.getElementById('copyBtn').addEventListener('click', function () {
+    var text = document.getElementById('blogText').value;
+    navigator.clipboard.writeText(text).then(function () {
+      document.getElementById('copyBtn').textContent = 'コピーしました';
+      setTimeout(function () { document.getElementById('copyBtn').textContent = 'コピー'; }, 1500);
+    });
+  });
+
+  // ===== 投稿ボタン: GBP・WordPress・SalonBoardへ同時投稿 =====
+  document.getElementById('publishBtn').addEventListener('click', async function () {
+    var statusMsg = document.getElementById('statusMsg');
+    var publishBtn = document.getElementById('publishBtn');
+    var stylistId = document.getElementById('stylistSelect').value;
+
+    publishBtn.disabled = true;
+    statusMsg.textContent = '投稿しています…';
+
+    try {
+      const res = await fetch('/api/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          storeId: document.getElementById('storeSelect').value,
+          mimeType: currentImage.mimeType,
+          imageBase64: currentImage.base64,
+          finalText: document.getElementById('blogText').value,
+          stylistId: stylistId,
+        }),
+      });
+      const result = await res.json();
+      publishBtn.disabled = false;
+
+      if (!result.success) {
+        statusMsg.textContent = '投稿に失敗しました: ' + result.error;
+        return;
+      }
+      statusMsg.textContent = '投稿を受け付けました(反映まで少し時間がかかります)';
+    } catch (err) {
+      publishBtn.disabled = false;
+      statusMsg.textContent = 'エラーが発生しました: ' + err.message;
+    }
+  });
+
+  init();
+</script>
+
+</body>
+</html>
