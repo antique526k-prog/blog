@@ -35,11 +35,15 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/screenshots', express.static(path.join(__dirname, 'screenshots')));
 
 // ===== ルーティング =====
-// 各ルーターファイルは routes/ 配下で個別に実装していく(次のステップ)
-// const generateRouter = require('./routes/generate');
-// const publishRouter = require('./routes/publish');
-// app.use('/api/generate', generateRouter);
-// app.use('/api/publish', publishRouter);
+const generateRouter = require('./routes/generate');
+const publishRouter = require('./routes/publish');
+const storesRouter = require('./routes/stores');
+const stylistsRouter = require('./routes/stylists');
+
+app.use('/api/generate', generateRouter);
+app.use('/api/publish', publishRouter);
+app.use('/api/stores', storesRouter);
+app.use('/api/stylists', stylistsRouter);
 
 // ヘルスチェック用(Renderが生存確認に使う。念のため用意)
 app.get('/health', (req, res) => {
