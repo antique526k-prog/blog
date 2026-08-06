@@ -130,6 +130,50 @@ async function waitForPageStable(page, maxRetries = 15, intervalMs = 1000) {
   return false;
 }
 
+// ===== SalonBoard(スマホ版)特有のタッチイベント専用ボタンをクリックする共通関数 =====
+// SalonBoardのスマホ版ボタンは通常のクリックイベント(mousedown/mouseup/click)には反応せず、
+// touchstart/touchmove/touchend のタッチイベントにのみ反応するものが多い。
+// data-touch-target属性が付与された要素に対して、この関数でタッチをシミュレートする。
+async function tapElement(page, selector, label = '') {
+  const rect = await page.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  }, selector);
+
+  if (!rect) {
+    console.log(`[${label}] タップ対象の座標が取得できませんでした。`);
+    return false;
+  }
+
+  console.log(`[${label}] タッチイベントをシミュレートします: (${rect.x}, ${rect.y})`);
+  try {
+    await page.touchscreen.tap(rect.x, rect.y);
+    console.log(`[${label}] page.touchscreen.tap() を実行しました。`);
+    return true;
+  } catch (touchError) {
+    console.log(`[${label}] page.touchscreen.tap() に失敗: ` + touchError.message);
+    try {
+      const client = await page.target().createCDPSession();
+      await client.send('Input.dispatchTouchEvent', {
+        type: 'touchStart',
+        touchPoints: [{ x: rect.x, y: rect.y }]
+      });
+      await new Promise(resolve => setTimeout(resolve, 100));
+      await client.send('Input.dispatchTouchEvent', {
+        type: 'touchEnd',
+        touchPoints: []
+      });
+      console.log(`[${label}] CDP経由でのタッチイベント発火に成功しました。`);
+      return true;
+    } catch (cdpError) {
+      console.log(`[${label}] CDP経由でのタッチイベント発火にも失敗: ` + cdpError.message);
+      return false;
+    }
+  }
+}
+
 async function loginToSalonBoard() {
   const fs = require('fs');
   if (!fs.existsSync(SCREENSHOT_DIR)) {
@@ -778,8 +822,16 @@ async function loginToSalonBoard() {
 
             await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 500));
 
-            await page.click('[data-auto-draft-target="true"]');
-            console.log('「登録・未反映にする」ボタンをクリックしました。');
+            // このボタンもタッチイベント専用の可能性が高いため、
+            // 通常クリックとタッチイベントの両方を試す
+            try {
+              await page.click('[data-auto-draft-target="true"]');
+              console.log('「登録・未反映にする」ボタンを標準クリックしました。');
+            } catch (e) {
+              console.log('「登録・未反映にする」ボタンの標準クリックに失敗: ' + e.message);
+            }
+
+            await tapElement(page, '[data-auto-draft-target="true"]', '登録・未反映にする');
 
             await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {
               console.log('登録後ページへの遷移検知(waitForNavigation)がタイムアウトしました。安定待ちに切り替えます。');
