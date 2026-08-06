@@ -150,14 +150,25 @@ async function loginToSalonBoard() {
     }
 
     // Puppeteer標準のクリック方式を使う(座標クリックなので実際のユーザー操作に近い)
-    // まずテキストからXPathで要素を特定する
-    const [loginButton] = await page.$x("//a[contains(text(), 'ログイン') and not(contains(text(), 'ID')) and not(contains(text(), 'パスワード'))]");
-    if (loginButton) {
-      await loginButton.click();
+    // $x()は新しいPuppeteerバージョンで廃止されているため、
+    // evaluateでXPath相当の処理をしてから、要素のCSSセレクタ的な位置を特定する方式にする。
+    // ここでは、ボタンにevaluate内で一時的な目印(data属性)を付けてから
+    // page.click()で本物のマウスクリックイベントを発生させる。
+    const marked = await page.evaluate(() => {
+      const links = Array.from(document.querySelectorAll('a'));
+      const loginLink = links.find(a => a.textContent.trim() === 'ログイン');
+      if (loginLink) {
+        loginLink.setAttribute('data-auto-login-target', 'true');
+        return true;
+      }
+      return false;
+    });
+
+    if (marked) {
+      await page.click('a[data-auto-login-target="true"]');
       console.log('Puppeteer標準クリックでボタンを押しました。');
     } else {
-      // 見つからない場合は従来のJS click()にフォールバック
-      console.log('XPathでの検出に失敗。JS click()にフォールバックします。');
+      console.log('目印付けに失敗。JS click()にフォールバックします。');
       await page.evaluate(() => {
         const links = Array.from(document.querySelectorAll('a'));
         const loginLink = links.find(a => a.textContent.trim() === 'ログイン');
