@@ -121,8 +121,19 @@ async function loginToSalonBoard() {
     });
 
     await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {
-      console.log('画面遷移の検知がタイムアウトしました。手動確認が必要かもしれません。');
+      console.log('画面遷移の検知がタイムアウトしました。念のため追加で待機します。');
     });
+
+    // ページ遷移の検知が不安定な場合があるため、
+    // 念のため固定時間も待ってから撮影する(合計で確実に数秒待つ)
+    await new Promise(resolve => setTimeout(resolve, 5000));
+
+    // ページの読み込み状態も確認しておく(ログに残すことで判断材料にする)
+    const readyState = await page.evaluate(() => document.readyState);
+    console.log('ページの読み込み状態: ' + readyState);
+
+    const bodyText = await page.evaluate(() => document.body.innerText.slice(0, 200));
+    console.log('ページ本文の冒頭200文字: ' + bodyText);
 
     // スクリーンショットをファイル名にタイムスタンプを付けて保存
     const fileName = `after_login_${Date.now()}.png`;
