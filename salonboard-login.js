@@ -638,6 +638,13 @@ async function loginToSalonBoard() {
           const btn = matches[0];
           if (btn) {
             const rect = btn.getBoundingClientRect();
+            // jQueryでイベントが登録されている場合、jQueryのdataにハンドラが記録されていることがある
+            let jqueryEvents = null;
+            try {
+              if (window.jQuery && window.jQuery._data) {
+                jqueryEvents = Object.keys(window.jQuery._data(btn, 'events') || {});
+              }
+            } catch (e) {}
             return {
               found: true,
               matchCount: matches.length,
@@ -645,6 +652,9 @@ async function loginToSalonBoard() {
               type: btn.type || null,
               onclick: btn.getAttribute('onclick'),
               className: btn.className,
+              href: btn.getAttribute('href'),
+              parentFormId: btn.closest('form') ? btn.closest('form').id : null,
+              jqueryEvents: jqueryEvents,
               rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
             };
           }
@@ -659,10 +669,38 @@ async function loginToSalonBoard() {
             if (btn) btn.setAttribute('data-auto-confirm-target', 'true');
           });
 
-          await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 500));
+          // クリック前に要素を画面内にスクロールする(not clickableエラー対策)
+          await page.evaluate(() => {
+            const el = document.querySelector('[data-auto-confirm-target="true"]');
+            if (el) el.scrollIntoView({ block: 'center' });
+          });
+          await new Promise(resolve => setTimeout(resolve, 800));
 
-          await page.click('[data-auto-confirm-target="true"]');
-          console.log('「確認する」ボタンをクリックしました。');
+          let confirmClickSucceeded = true;
+          try {
+            await page.click('[data-auto-confirm-target="true"]');
+            console.log('「確認する」ボタンをクリックしました。');
+          } catch (clickError) {
+            confirmClickSucceeded = false;
+            console.log('「確認する」ボタンの標準クリックに失敗: ' + clickError.message);
+          }
+
+          // 標準クリックが「成功」と表示されても実際には反応しない場合があるため、
+          // 念のため座標ベースの物理的なマウスクリックも追加で実行する
+          const btnRect = await page.evaluate(() => {
+            const el = document.querySelector('[data-auto-confirm-target="true"]');
+            if (!el) return null;
+            const rect = el.getBoundingClientRect();
+            return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+          });
+
+          if (btnRect) {
+            console.log(`座標ベースのマウスクリックを実行します: (${btnRect.x}, ${btnRect.y})`);
+            await page.mouse.click(btnRect.x, btnRect.y);
+            console.log('座標ベースのマウスクリックを実行しました。');
+          } else {
+            console.log('ボタンの座標が取得できませんでした。');
+          }
 
           await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {
             console.log('確認画面への遷移検知(waitForNavigation)がタイムアウトしました。安定待ちに切り替えます。');
