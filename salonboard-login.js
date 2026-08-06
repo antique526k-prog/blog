@@ -497,6 +497,39 @@ async function loginToSalonBoard() {
 
         await new Promise(resolve => setTimeout(resolve, 400 + Math.random() * 400));
 
+        // 診断: ページ内の全textarea要素の状態を洗い出す(本当に入力すべき欄を特定するため)
+        const allTextareas = await page.evaluate(() => {
+          const areas = Array.from(document.querySelectorAll('textarea'));
+          return areas.map(a => {
+            const rect = a.getBoundingClientRect();
+            const style = window.getComputedStyle(a);
+            return {
+              id: a.id,
+              name: a.name,
+              className: a.className,
+              visible: rect.width > 0 && rect.height > 0 && style.display !== 'none',
+              rect: { width: rect.width, height: rect.height },
+              value: a.value ? a.value.slice(0, 30) : ''
+            };
+          });
+        }).catch(e => [{ error: e.message }]);
+        console.log('全textarea要素の一覧: ' + JSON.stringify(allTextareas, null, 2));
+
+        // 診断: contenteditable(リッチテキストエディタ)な要素も探す
+        const editableElements = await page.evaluate(() => {
+          const editables = Array.from(document.querySelectorAll('[contenteditable="true"], iframe'));
+          return editables.map(el => {
+            const rect = el.getBoundingClientRect();
+            return {
+              tag: el.tagName,
+              id: el.id,
+              className: el.className,
+              rect: { width: rect.width, height: rect.height }
+            };
+          });
+        }).catch(e => [{ error: e.message }]);
+        console.log('contenteditable/iframe要素の一覧: ' + JSON.stringify(editableElements, null, 2));
+
         // 診断: #blogContents 要素の実際の状態を詳しく調べる
         const contentsElState = await page.evaluate(() => {
           const el = document.querySelector('#blogContents');
@@ -586,16 +619,21 @@ async function loginToSalonBoard() {
 
         const confirmButtonInfo = await page.evaluate(() => {
           const candidates = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"], div[onclick], span[onclick]'));
-          const btn = candidates.find(el => (el.textContent || el.value || '').trim() === '確認する');
+          const matches = candidates.filter(el => (el.textContent || el.value || '').trim() === '確認する');
+          const btn = matches[0];
           if (btn) {
+            const rect = btn.getBoundingClientRect();
             return {
               found: true,
+              matchCount: matches.length,
               tag: btn.tagName,
               type: btn.type || null,
-              onclick: btn.getAttribute('onclick')
+              onclick: btn.getAttribute('onclick'),
+              className: btn.className,
+              rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
             };
           }
-          return { found: false };
+          return { found: false, matchCount: 0 };
         });
         console.log('「確認する」ボタンの検出結果: ' + JSON.stringify(confirmButtonInfo));
 
