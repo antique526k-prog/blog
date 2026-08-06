@@ -62,6 +62,8 @@ const LOGIN_URL = 'https://salonboard.com/login_sp/';
 // ===== テスト投稿用の内容(あくまでテスト。実際の運用では動的に生成する) =====
 const TEST_BLOG_TITLE = 'テスト投稿';
 const TEST_BLOG_BODY = 'これは自動投稿システムのテストです。\n実際には送信せず、確認画面の一歩手前で止めています。';
+// テスト用画像。実運用時はHotPepperブログの画像URLに差し替える想定。
+const TEST_IMAGE_URL = 'https://picsum.photos/600/600';
 
 // ===== LINEへ画像を送る処理 =====
 async function sendImageToLine(imageUrl) {
@@ -134,6 +136,41 @@ async function waitForPageStable(page, maxRetries = 15, intervalMs = 1000) {
 // SalonBoardのスマホ版ボタンは通常のクリックイベント(mousedown/mouseup/click)には反応せず、
 // touchstart/touchmove/touchend のタッチイベントにのみ反応するものが多い。
 // data-touch-target属性が付与された要素に対して、この関数でタッチをシミュレートする。
+// ===== 画像URLをローカルファイルとしてダウンロードする共通関数 =====
+// 画像アップロード(Puppeteerのuploadfile)にはローカルファイルパスが必要なため、
+// HotPepper等の画像URLをまず一時ファイルとして保存してから使う。
+function downloadFile(url, destPath, redirectCount = 0) {
+  return new Promise((resolve, reject) => {
+    if (redirectCount > 5) {
+      reject(new Error('リダイレクトが多すぎます'));
+      return;
+    }
+    const https = require('https');
+    const fs = require('fs');
+    const file = fs.createWriteStream(destPath);
+    https.get(url, (response) => {
+      if (response.statusCode === 301 || response.statusCode === 302) {
+        file.close();
+        fs.unlink(destPath, () => {});
+        downloadFile(response.headers.location, destPath, redirectCount + 1).then(resolve).catch(reject);
+        return;
+      }
+      if (response.statusCode !== 200) {
+        reject(new Error(`画像ダウンロード失敗: HTTP ${response.statusCode}`));
+        return;
+      }
+      response.pipe(file);
+      file.on('finish', () => {
+        file.close();
+        resolve();
+      });
+    }).on('error', (err) => {
+      fs.unlink(destPath, () => {});
+      reject(err);
+    });
+  });
+}
+
 async function tapElement(page, selector, label = '') {
   const rect = await page.evaluate((sel) => {
     const el = document.querySelector(sel);
@@ -708,6 +745,95 @@ async function loginToSalonBoard() {
           };
         });
         console.log('画像アップロード関連の調査結果: ' + JSON.stringify(imageUploadInfo));
+
+        // ===== 画像アップロードのテスト =====
+        // input[type="file"]が既に画面上に存在し操作可能なため、
+        // Puppeteerの uploadFile() で直接ファイルパスを渡す。
+        // (見た目上の「画像アップロード」ボタンをクリックする必要はない)
+        if (imageUploadInfo.fileInput && imageUploadInfo.fileInput.visible) {
+          try {
+            console.log('テスト画像をダウンロード中...');
+            const testImagePath = path.join(__dirname, 'test-upload-image.jpg');
+            await downloadFile(TEST_IMAGE_URL, testImagePath);
+            console.log('テスト画像のダウンロードが完了しました: ' + testImagePath);
+
+            const fileInputHandle = await page.$('#IMG_PATH');
+            if (fileInputHandle) {
+              await fileInputHandle.uploadFile(testImagePath);
+              console.log('画像アップロード欄にファイルをセットしました。');
+
+              // アップロード処理(SalonBoard側での非同期アップロード)が完了するまで待つ
+              await new Promise(resolve => setTimeout(resolve, 3000));
+
+              // アップロード後の画像プレビューが表示されているか確認
+              const uploadResult = await page.evaluate(() => {
+                const imgs = Array.from(document.querySelectorAll('img'))
+                  .filter(img => img.src && img.src.includes('blog'));
+                return imgs.map(img => ({ src: img.src, visible: img.getBoundingClientRect().width > 0 }));
+              }).catch(() => []);
+              console.log('アップロード後の画像プレビュー調査: ' + JSON.stringify(uploadResult));
+            } else {
+              console.log('画像アップロード欄(#IMG_PATH)が見つかりませんでした。');
+            }
+          } catch (uploadError) {
+            console.log('画像アップロード処理中にエラー: ' + uploadError.message);
+          }
+        } else {
+          console.log('画像アップロード欄が操作可能な状態ではありませんでした。');
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // ===== クーポン選択モーダルの調査 =====
+        // jscModalOpen クラスから、クリックでモーダルが開くタイプと判明済み。
+        // 通常のクリックイベントに反応するため、タッチイベントは不要。
+        console.log('クーポン選択ボタンをクリックしてモーダルの中身を調査します...');
+        try {
+          await page.click('.couponchoiceBtn');
+          await new Promise(resolve => setTimeout(resolve, 1000));
+
+          const couponModalContent = await page.evaluate(() => {
+            // モーダルは通常、直前まで存在しなかった新しい要素として追加される
+            // クラス名に "modal" が含まれる要素を広く探す
+            const modals = Array.from(document.querySelectorAll('[class*="modal" i], [class*="Modal"]'));
+            return modals
+              .filter(el => el.getBoundingClientRect().width > 0)
+              .map(el => ({
+                tag: el.tagName,
+                className: el.className,
+                textPreview: (el.innerText || '').slice(0, 300)
+              }));
+          }).catch(e => [{ error: e.message }]);
+          console.log('クーポンモーダルの中身調査: ' + JSON.stringify(couponModalContent, null, 2));
+
+          // モーダルのスクリーンショットを撮ってLINEに送信(目視確認用)
+          const couponModalFileName = `coupon_modal_${Date.now()}.png`;
+          const couponModalFilePath = path.join(SCREENSHOT_DIR, couponModalFileName);
+          await page.screenshot({ path: couponModalFilePath, fullPage: true });
+          const couponModalImageUrl = `${RENDER_BASE_URL}/screenshots/${couponModalFileName}`;
+          await sendImageToLine(couponModalImageUrl);
+          console.log('クーポンモーダルの画像をLINEに送信しました。');
+
+          // 今回はまだクーポンを選択せず、モーダルを閉じておく(調査のみのため)
+          // 一般的な閉じ方(×ボタンや背景クリック)を試す
+          const closeBtn = await page.evaluate(() => {
+            const candidates = Array.from(document.querySelectorAll('[class*="close" i], [class*="Close"]'));
+            const btn = candidates.find(el => el.getBoundingClientRect().width > 0);
+            if (btn) {
+              btn.setAttribute('data-auto-modal-close', 'true');
+              return true;
+            }
+            return false;
+          });
+          if (closeBtn) {
+            await page.click('[data-auto-modal-close="true"]').catch(() => {});
+            console.log('モーダルを閉じるボタンをクリックしました。');
+          } else {
+            console.log('モーダルの閉じるボタンが見つかりませんでした(調査を続行します)。');
+          }
+        } catch (couponError) {
+          console.log('クーポンモーダルの調査中にエラー: ' + couponError.message);
+        }
 
         await new Promise(resolve => setTimeout(resolve, 500));
 
