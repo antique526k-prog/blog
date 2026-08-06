@@ -27,12 +27,18 @@
  * 前提に進めています。商用サービス化や他社への提供は行わないでください。
  */
 
+const path = require('path');
+
+// 日本語フォント(.fonts)を認識させるため、HOME環境変数をプロジェクト内に向ける。
+// install-fonts.js で /project/.fonts に配置したフォントを、
+// Chromeが起動時に見つけられるようにするための設定。
+process.env.HOME = __dirname;
+
 const puppeteerExtra = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 puppeteerExtra.use(StealthPlugin());
 const puppeteer = puppeteerExtra;
 const express = require('express');
-const path = require('path');
 const fetch = require('node-fetch'); // Node 18以降ならglobal fetchでも可
 
 const app = express();
