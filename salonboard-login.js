@@ -553,39 +553,54 @@ async function loginToSalonBoard() {
         }).catch(e => ({ error: e.message }));
         console.log('#blogContents の状態: ' + JSON.stringify(contentsElState));
 
+        // #blogContents はリッチテキストエディタ(nicEdit)の裏側の隠しtextareaであり、
+        // 実際にユーザーが操作するのは class="nicEdit-main" を持つ contenteditable な div。
+        // ここに直接クリック・入力することで、nicEditが自動的に裏側のtextareaへ同期してくれる。
         await page.evaluate(() => {
-          const el = document.querySelector('#blogContents');
+          const el = document.querySelector('.nicEdit-main');
           if (el) el.scrollIntoView({ block: 'center' });
         });
         await new Promise(resolve => setTimeout(resolve, 800));
 
-        let contentsClickSucceeded = true;
+        let nicEditClickSucceeded = true;
         try {
-          await page.click('#blogContents');
-          console.log('#blogContents: 標準クリックに成功しました。');
+          await page.click('.nicEdit-main');
+          console.log('.nicEdit-main: 標準クリックに成功しました。');
         } catch (clickError) {
-          contentsClickSucceeded = false;
-          console.log('#blogContents: 標準クリックに失敗(' + clickError.message + ')。JS直接入力方式にフォールバックします。');
+          nicEditClickSucceeded = false;
+          console.log('.nicEdit-main: 標準クリックに失敗(' + clickError.message + ')。');
         }
 
-        if (contentsClickSucceeded) {
-          // クリックが成功した場合のみ page.type を使う(type内部でも要素をクリックするため)
-          await page.type('#blogContents', TEST_BLOG_BODY, { delay: 40 + Math.random() * 30 });
+        if (nicEditClickSucceeded) {
+          // contenteditableなdivはpage.typeで直接タイピングできる
+          await page.type('.nicEdit-main', TEST_BLOG_BODY, { delay: 40 + Math.random() * 30 });
+          console.log('.nicEdit-main: 標準タイピングで本文を入力しました。');
         } else {
-          // クリックできない場合は、JSで直接値をセットし、
-          // Reactやフレームワーク側の変更検知イベントも発火させる
+          // クリックできない場合は、JSで直接innerHTMLをセットし、
+          // nicEdit側の同期処理が拾えるようイベントを発火させる
           await page.evaluate((text) => {
-            const el = document.querySelector('#blogContents');
+            const el = document.querySelector('.nicEdit-main');
             if (el) {
               el.focus();
-              el.value = text;
+              // 改行はnicEdit内部では<br>として扱われることが多いため変換する
+              el.innerHTML = text.replace(/\n/g, '<br>');
               el.dispatchEvent(new Event('input', { bubbles: true }));
-              el.dispatchEvent(new Event('change', { bubbles: true }));
-              el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+              el.dispatchEvent(new Event('keyup', { bubbles: true }));
+              el.dispatchEvent(new Event('blur', { bubbles: true }));
             }
           }, TEST_BLOG_BODY);
-          console.log('#blogContents: JS直接入力で値をセットしました。');
+          console.log('.nicEdit-main: JS直接入力で値をセットしました。');
         }
+
+        // 入力後、nicEditが裏側のtextareaに同期する時間を少し置く
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // 同期できているか確認のため、裏側のtextareaの値もログに出す
+        const syncedValue = await page.evaluate(() => {
+          const el = document.querySelector('#blogContents');
+          return el ? el.value : null;
+        }).catch(() => null);
+        console.log('#blogContents(裏側)に同期された値: ' + syncedValue);
 
         console.log('タイトル・本文の入力が完了しました。');
 
