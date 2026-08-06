@@ -661,6 +661,54 @@ async function loginToSalonBoard() {
           console.log('カテゴリを選択しました: ' + dropdownOptions.category[1].text);
         }
 
+        // ===== 調査: クーポン選択ボタンの構造を確認する =====
+        const couponButtonInfo = await page.evaluate(() => {
+          const candidates = Array.from(document.querySelectorAll('a, button, input[type="button"], div[onclick], span[onclick]'));
+          const btn = candidates.find(el => (el.textContent || '').trim() === 'クーポン選択');
+          if (btn) {
+            const rect = btn.getBoundingClientRect();
+            let jqueryEvents = null;
+            try {
+              if (window.jQuery && window.jQuery._data) {
+                jqueryEvents = Object.keys(window.jQuery._data(btn, 'events') || {});
+              }
+            } catch (e) {}
+            return {
+              found: true,
+              tag: btn.tagName,
+              onclick: btn.getAttribute('onclick'),
+              href: btn.getAttribute('href'),
+              className: btn.className,
+              jqueryEvents: jqueryEvents,
+              rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+            };
+          }
+          return { found: false };
+        });
+        console.log('クーポン選択ボタンの調査結果: ' + JSON.stringify(couponButtonInfo));
+
+        // ===== 調査: 画像アップロードボタン・input[type=file]の構造を確認する =====
+        const imageUploadInfo = await page.evaluate(() => {
+          const uploadBtn = Array.from(document.querySelectorAll('a, button, div[onclick], span[onclick]'))
+            .find(el => (el.textContent || '').trim() === '画像アップロード');
+          const fileInput = document.querySelector('input[type="file"]');
+          return {
+            uploadButton: uploadBtn ? {
+              tag: uploadBtn.tagName,
+              onclick: uploadBtn.getAttribute('onclick'),
+              className: uploadBtn.className
+            } : null,
+            fileInput: fileInput ? {
+              id: fileInput.id,
+              name: fileInput.name,
+              accept: fileInput.accept,
+              multiple: fileInput.multiple,
+              visible: fileInput.getBoundingClientRect().width > 0
+            } : null
+          };
+        });
+        console.log('画像アップロード関連の調査結果: ' + JSON.stringify(imageUploadInfo));
+
         await new Promise(resolve => setTimeout(resolve, 500));
 
         // 入力後の状態をスクリーンショットで確認(まだ「確認する」は押さない)
