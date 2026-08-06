@@ -121,19 +121,42 @@ async function loginToSalonBoard() {
     });
 
     await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {
-      console.log('画面遷移の検知がタイムアウトしました。念のため追加で待機します。');
+      console.log('画面遷移の検知がタイムアウトしました。安定するまで確認を繰り返します。');
     });
 
-    // ページ遷移の検知が不安定な場合があるため、
-    // 念のため固定時間も待ってから撮影する(合計で確実に数秒待つ)
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    // ページが本当に安定するまで、最大10回(約10秒)チェックを繰り返す
+    // SalonBoardはログイン後に複数回リダイレクトを挟む可能性があるため、
+    // 固定時間待つだけでは不十分な場合がある
+    let stableCheckCount = 0;
+    let lastUrl = '';
+    for (let i = 0; i < 10; i++) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      try {
+        const currentUrl = page.url();
+        const readyState = await page.evaluate(() => document.readyState).catch(() => 'unknown');
+        console.log(`[待機${i + 1}回目] URL: ${currentUrl} / 状態: ${readyState}`);
 
-    // ページの読み込み状態も確認しておく(ログに残すことで判断材料にする)
-    const readyState = await page.evaluate(() => document.readyState);
-    console.log('ページの読み込み状態: ' + readyState);
+        // URLが変わらず、かつreadyStateがcompleteなら安定したとみなす
+        if (currentUrl === lastUrl && readyState === 'complete') {
+          stableCheckCount++;
+          if (stableCheckCount >= 2) {
+            console.log('ページが安定したと判断しました。');
+            break;
+          }
+        } else {
+          stableCheckCount = 0;
+        }
+        lastUrl = currentUrl;
+      } catch (e) {
+        console.log(`[待機${i + 1}回目] チェック中にエラー(遷移中の可能性): ${e.message}`);
+      }
+    }
 
-    const bodyText = await page.evaluate(() => document.body.innerText.slice(0, 200));
-    console.log('ページ本文の冒頭200文字: ' + bodyText);
+    // bodyの存在を確認してから安全にテキストを取得する
+    const bodyText = await page.evaluate(() => {
+      return document.body ? document.body.innerText.slice(0, 300) : '(bodyが存在しません)';
+    }).catch(() => '(本文の取得に失敗しました)');
+    console.log('ページ本文の冒頭300文字: ' + bodyText);
 
     // スクリーンショットをファイル名にタイムスタンプを付けて保存
     const fileName = `after_login_${Date.now()}.png`;
