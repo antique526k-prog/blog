@@ -310,6 +310,69 @@ async function loginToSalonBoard() {
       const blogImageUrl = `${RENDER_BASE_URL}/screenshots/${blogFileName}`;
       await sendImageToLine(blogImageUrl);
       console.log('ブログページの画像をLINEに送信しました。');
+
+      // ===== ここから「新規投稿」ボタンへの遷移を試みる =====
+      console.log('新規投稿ボタンを探しています...');
+
+      const newPostButtonInfo = await page.evaluate(() => {
+        const candidates = Array.from(document.querySelectorAll('a, button, div[onclick], span[onclick]'));
+        const btn = candidates.find(el => el.textContent.trim() === '新規投稿');
+        if (btn) {
+          return {
+            found: true,
+            tag: btn.tagName,
+            href: btn.getAttribute('href'),
+            onclick: btn.getAttribute('onclick')
+          };
+        }
+        return { found: false };
+      });
+      console.log('新規投稿ボタンの検出結果: ' + JSON.stringify(newPostButtonInfo));
+
+      if (newPostButtonInfo.found) {
+        await page.evaluate(() => {
+          const candidates = Array.from(document.querySelectorAll('a, button, div[onclick], span[onclick]'));
+          const btn = candidates.find(el => el.textContent.trim() === '新規投稿');
+          if (btn) btn.setAttribute('data-auto-newpost-target', 'true');
+        });
+
+        await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 500));
+
+        await page.click('[data-auto-newpost-target="true"]');
+        console.log('新規投稿ボタンをクリックしました。');
+
+        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {
+          console.log('新規投稿ページへの遷移検知がタイムアウトしました。');
+        });
+
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        console.log('新規投稿ページのURL: ' + page.url());
+
+        // 投稿フォームのinput/textarea/select要素を洗い出す
+        // (これで、タイトル欄・本文欄・画像アップロード欄のname属性を特定する)
+        const formFields = await page.evaluate(() => {
+          const fields = Array.from(document.querySelectorAll('input, textarea, select'));
+          return fields.map(f => ({
+            tag: f.tagName,
+            type: f.type || null,
+            name: f.name || null,
+            id: f.id || null,
+            placeholder: f.placeholder || null
+          }));
+        });
+        console.log('投稿フォームのフィールド一覧: ' + JSON.stringify(formFields, null, 2));
+
+        const newPostFileName = `new_post_form_${Date.now()}.png`;
+        const newPostFilePath = path.join(SCREENSHOT_DIR, newPostFileName);
+        await page.screenshot({ path: newPostFilePath, fullPage: true });
+
+        const newPostImageUrl = `${RENDER_BASE_URL}/screenshots/${newPostFileName}`;
+        await sendImageToLine(newPostImageUrl);
+        console.log('新規投稿フォームの画像をLINEに送信しました。');
+      } else {
+        console.log('新規投稿ボタンが見つかりませんでした。');
+      }
     } else {
       console.log('ブログボタンが見つかりませんでした。ページ構造を再確認する必要があります。');
     }
