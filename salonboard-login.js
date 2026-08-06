@@ -438,14 +438,48 @@ async function loginToSalonBoard() {
         // ===== タイトル・本文を自動入力する(テスト用の内容) =====
         console.log('タイトル・本文を入力します...');
 
-        // クリック前に要素を画面内にスクロールしてから操作する(not clickableエラー対策)
+        // 診断: #blogTitle 要素の実際の状態を詳しく調べる
+        const titleElState = await page.evaluate(() => {
+          const el = document.querySelector('#blogTitle');
+          if (!el) return { exists: false };
+          const rect = el.getBoundingClientRect();
+          const style = window.getComputedStyle(el);
+          return {
+            exists: true,
+            rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+            disabled: el.disabled,
+            readOnly: el.readOnly,
+            display: style.display,
+            visibility: style.visibility,
+            opacity: style.opacity,
+            pointerEvents: style.pointerEvents,
+            // その座標に実際に何の要素があるか(重なりの確認)
+            elementAtPoint: (() => {
+              const topEl = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+              return topEl ? { tag: topEl.tagName, id: topEl.id, className: topEl.className } : null;
+            })()
+          };
+        }).catch(e => ({ error: e.message }));
+        console.log('#blogTitle の状態: ' + JSON.stringify(titleElState));
+
+        // クリック前に要素を画面内にスクロールしてから操作する
         await page.evaluate(() => {
           const el = document.querySelector('#blogTitle');
           if (el) el.scrollIntoView({ block: 'center' });
         });
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise(resolve => setTimeout(resolve, 800));
 
-        await page.click('#blogTitle');
+        // まずPuppeteer標準クリックを試し、失敗したらfocus()+type方式にフォールバック
+        try {
+          await page.click('#blogTitle');
+          console.log('#blogTitle: 標準クリックに成功しました。');
+        } catch (clickError) {
+          console.log('#blogTitle: 標準クリックに失敗(' + clickError.message + ')。focus方式にフォールバックします。');
+          await page.evaluate(() => {
+            const el = document.querySelector('#blogTitle');
+            if (el) el.focus();
+          });
+        }
         await page.type('#blogTitle', TEST_BLOG_TITLE, { delay: 60 + Math.random() * 40 });
 
         await new Promise(resolve => setTimeout(resolve, 400 + Math.random() * 400));
@@ -454,9 +488,18 @@ async function loginToSalonBoard() {
           const el = document.querySelector('#blogContents');
           if (el) el.scrollIntoView({ block: 'center' });
         });
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise(resolve => setTimeout(resolve, 800));
 
-        await page.click('#blogContents');
+        try {
+          await page.click('#blogContents');
+          console.log('#blogContents: 標準クリックに成功しました。');
+        } catch (clickError) {
+          console.log('#blogContents: 標準クリックに失敗(' + clickError.message + ')。focus方式にフォールバックします。');
+          await page.evaluate(() => {
+            const el = document.querySelector('#blogContents');
+            if (el) el.focus();
+          });
+        }
         await page.type('#blogContents', TEST_BLOG_BODY, { delay: 40 + Math.random() * 30 });
 
         console.log('タイトル・本文の入力が完了しました。');
