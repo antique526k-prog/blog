@@ -94,6 +94,42 @@ async function sendImageToLine(imageUrl) {
 }
 
 // ===== メイン処理 =====
+// ===== ページが安定するまで待つ共通関数 =====
+// SalonBoardは遷移時に複数回リダイレクトやフレーム切り替えを挟むことがあるため、
+// 「evaluateが失敗しなくなるまで」を安定の基準としてリトライする。
+// これにより「Detached Frame」エラーを回避する。
+async function waitForPageStable(page, maxRetries = 15, intervalMs = 1000) {
+  let stableCount = 0;
+  let lastUrl = '';
+
+  for (let i = 0; i < maxRetries; i++) {
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+    try {
+      const currentUrl = page.url();
+      const readyState = await page.evaluate(() => document.readyState);
+      const hasBody = await page.evaluate(() => !!document.body);
+      console.log(`[安定待ち${i + 1}回目] URL: ${currentUrl} / 状態: ${readyState} / body存在: ${hasBody}`);
+
+      if (currentUrl === lastUrl && readyState === 'complete' && hasBody) {
+        stableCount++;
+        if (stableCount >= 2) {
+          console.log('ページが安定したと判断しました。');
+          return true;
+        }
+      } else {
+        stableCount = 0;
+      }
+      lastUrl = currentUrl;
+    } catch (e) {
+      // Detached Frame等のエラーはここでキャッチして、リトライを続ける
+      console.log(`[安定待ち${i + 1}回目] チェック中にエラー(遷移中のため無視): ${e.message}`);
+      stableCount = 0;
+    }
+  }
+  console.log('ページの安定を確認できないままタイムアウトしました。処理を続行します。');
+  return false;
+}
+
 async function loginToSalonBoard() {
   const fs = require('fs');
   if (!fs.existsSync(SCREENSHOT_DIR)) {
@@ -293,10 +329,10 @@ async function loginToSalonBoard() {
 
       // 遷移を待つ
       await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {
-        console.log('ブログページへの遷移検知がタイムアウトしました。');
+        console.log('ブログページへの遷移検知(waitForNavigation)がタイムアウトしました。安定待ちに切り替えます。');
       });
 
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await waitForPageStable(page);
 
       console.log('ブログページのURL: ' + page.url());
 
@@ -346,10 +382,10 @@ async function loginToSalonBoard() {
         console.log('新規投稿ボタンをクリックしました。');
 
         await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {
-          console.log('新規投稿ページへの遷移検知がタイムアウトしました。');
+          console.log('新規投稿ページへの遷移検知(waitForNavigation)がタイムアウトしました。安定待ちに切り替えます。');
         });
 
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await waitForPageStable(page);
 
         console.log('新規投稿ページのURL: ' + page.url());
 
@@ -364,6 +400,9 @@ async function loginToSalonBoard() {
             id: f.id || null,
             placeholder: f.placeholder || null
           }));
+        }).catch((e) => {
+          console.log('フォームフィールド取得に失敗: ' + e.message);
+          return [];
         });
         console.log('投稿フォームのフィールド一覧: ' + JSON.stringify(formFields, null, 2));
 
@@ -389,6 +428,9 @@ async function loginToSalonBoard() {
             stylist: getOptions('select[name="stylistId"]'),
             category: getOptions('select[name="blogCategoryCd"]')
           };
+        }).catch((e) => {
+          console.log('プルダウン取得に失敗: ' + e.message);
+          return { stylist: null, category: null };
         });
         console.log('投稿者の選択肢: ' + JSON.stringify(dropdownOptions.stylist, null, 2));
         console.log('カテゴリの選択肢: ' + JSON.stringify(dropdownOptions.category, null, 2));
@@ -462,10 +504,10 @@ async function loginToSalonBoard() {
           console.log('「確認する」ボタンをクリックしました。');
 
           await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {
-            console.log('確認画面への遷移検知がタイムアウトしました。');
+            console.log('確認画面への遷移検知(waitForNavigation)がタイムアウトしました。安定待ちに切り替えます。');
           });
 
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          await waitForPageStable(page);
 
           console.log('確認画面のURL: ' + page.url());
 
