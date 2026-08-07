@@ -396,8 +396,14 @@ async function submitAsDraft(page) {
     return false;
   });
   if (!draftMarked) {
+    // 診断用に、現在のURLとページ本文冒頭を含めてエラーを投げる
+    const currentUrl = page.url();
+    const bodyPreview = await page
+      .evaluate(() => (document.body ? document.body.innerText.slice(0, 400) : '(bodyなし)'))
+      .catch(() => '(本文取得失敗)');
     throw new Error(
-      '「登録・未反映にする」ボタンが見つかりませんでした(確認画面に正しく遷移できていない可能性があります)'
+      `「登録・未反映にする」ボタンが見つかりませんでした(確認画面に正しく遷移できていない可能性があります)。` +
+      `URL: ${currentUrl} / ページ本文冒頭: ${bodyPreview}`
     );
   }
 
