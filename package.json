@@ -7,11 +7,16 @@
     "start": "node salonboard-login.js",
     "postinstall": "node install-fonts.js"
   },
-  "dependencies": {
-    "express": "^4.19.2",
-    "node-fetch": "^2.7.0",
-    "puppeteer": "^22.0.0",
-    "puppeteer-extra": "^3.3.6",
-    "puppeteer-extra-plugin-stealth": "^2.11.2"
-  }
+"dependencies": {
+  "express": "^4.19.2",
+  "node-fetch": "^2.7.0",
+  "puppeteer": "^22.0.0",
+  "puppeteer-extra": "^3.3.6",
+  "puppeteer-extra-plugin-stealth": "^2.11.2",
+  "google-spreadsheet": "^4.1.4",
+  "google-auth-library": "^9.14.1",
+  "dotenv": "^16.4.5",
+  "multer": "^1.4.5-lts.1",
+  "cors": "^2.8.5"
+}
 }
