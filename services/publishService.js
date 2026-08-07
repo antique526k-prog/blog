@@ -44,8 +44,9 @@ async function publishToAllChannels(storeId, finalText, base64Image, mimeType, s
       throw new Error('WordPress投稿が失敗したため、画像URLが取得できずSalonBoard投稿をスキップしました');
     }
     const imageUrl = wpResult.data.mediaUrl;
-    // SalonBoardのタイトルは25文字制限があるため、店舗名等は含めず短く切り詰める
-    const title = finalText.slice(0, 25);
+    // SalonBoardのタイトルは25文字制限があるため、店舗名等は含めず短く切り詰める。
+    // 改行が入っているとタイトル欄の入力でエラーになるため、事前に除去する。
+    const title = finalText.replace(/\n/g, ' ').trim().slice(0, 25);
     return postBlogToSalonBoard(store, {
       stylistId: stylistId || store.salonboard.defaultStylistId,
       categoryCd: store.salonboard.defaultCategoryCd,
