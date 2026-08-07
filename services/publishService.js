@@ -46,12 +46,14 @@ async function publishToAllChannels(storeId, finalText, base64Image, mimeType, s
     const imageUrl = wpResult.data.mediaUrl;
     // SalonBoardのタイトルは25文字制限があるため、店舗名等は含めず短く切り詰める。
     // 改行が入っているとタイトル欄の入力でエラーになるため、事前に除去する。
-    const title = finalText.replace(/\n/g, ' ').trim().slice(0, 25);
+    // 絵文字(✨等)もSalonBoard側のバリデーションで「不正な文字」として弾かれるため除去する。
+    const title = removeEmoji(finalText.replace(/\n/g, ' ')).trim().slice(0, 25);
+    const body = removeEmoji(fullText).slice(0, 1000);
     return postBlogToSalonBoard(store, {
       stylistId: stylistId || store.salonboard.defaultStylistId,
       categoryCd: store.salonboard.defaultCategoryCd,
       title,
-      body: fullText.slice(0, 1000),
+      body,
       imageUrl,
     });
   });
@@ -191,6 +193,21 @@ async function postToWordPress(store, text, base64Image, mimeType) {
   // GBP投稿・SalonBoard投稿で画像URLを使い回せるよう、mediaUrlを結果に含めて返す
   postJson.mediaUrl = mediaUrl;
   return postJson;
+}
+
+/**
+ * 文字列から絵文字を除去する
+ * SalonBoardの本文・タイトルは絵文字を「不正な文字」として拒否するため、
+ * SalonBoard投稿用のテキストにのみ適用する(WordPress・GBPには影響しない)。
+ * @private
+ */
+function removeEmoji(text) {
+  // 絵文字全般をカバーする範囲(顔文字、記号、ピクトグラム、囲み文字等)を除去する。
+  // 日本語の通常の記号(、。！？「」など)は範囲外のため影響しない。
+  return text.replace(
+    /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE0F}\u{200D}]/gu,
+    ''
+  );
 }
 
 /**
