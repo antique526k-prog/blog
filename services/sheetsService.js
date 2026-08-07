@@ -65,6 +65,21 @@ async function getOrCreateSheet(doc, sheetName, headerValues) {
   let sheet = doc.sheetsByTitle[sheetName];
   if (!sheet) {
     sheet = await doc.addSheet({ title: sheetName, headerValues });
+    await sheet.loadHeaderRow();
+    return sheet;
+  }
+
+  // 既存シートの場合も、ヘッダー行が空(壊れている)なら自己修復する。
+  // (手動でシートを作った/一部だけ消してしまった等のケースに対応)
+  try {
+    await sheet.loadHeaderRow();
+  } catch (e) {
+    if (String(e.message).includes('No values in the header row')) {
+      await sheet.setHeaderRow(headerValues);
+      await sheet.loadHeaderRow();
+    } else {
+      throw e;
+    }
   }
   return sheet;
 }
