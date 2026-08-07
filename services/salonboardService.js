@@ -135,8 +135,15 @@ async function launchBrowser() {
       '--disable-dev-shm-usage',
       '--disable-gpu',
       '--disable-background-networking',
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding',
+      '--disable-extensions',
+      '--disable-component-extensions-with-background-pages',
+      '--disable-default-apps',
       '--no-first-run',
       '--mute-audio',
+      '--js-flags=--max-old-space-size=256', // V8のヒープサイズを制限してメモリ使用量を抑える
     ],
   });
 }
