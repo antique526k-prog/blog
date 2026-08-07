@@ -62,18 +62,31 @@ async function getSpreadsheetDoc() {
  * @param {string[]} headerValues
  */
 async function getOrCreateSheet(doc, sheetName, headerValues) {
+  // doc.sheetsByTitle はキャッシュされたスナップショットのため、
+  // 他のリクエストで新規作成されたシートを見落とすことがある。
+  // 毎回 loadInfo() で最新のシート一覧を取得し直してから判定する。
+  await doc.loadInfo();
   let sheet = doc.sheetsByTitle[sheetName];
+
   if (!sheet) {
-    sheet = await doc.addSheet({ title: sheetName, headerValues });
-    await sheet.loadHeaderRow();
-    return sheet;
+    try {
+      sheet = await doc.addSheet({ title: sheetName, headerValues });
+      await sheet.loadHeaderRow();
+      return sheet;
+    } catch (createError) {
+      // 別のリクエストが同時に同名シートを作成していた場合(競合)は、
+      // 再度一覧を取得して既存シートを使う
+      await doc.loadInfo();
+      sheet = doc.sheetsByTitle[sheetName];
+      if (!sheet) throw createError;
+    }
   }
 
   // 既存シートの場合も、ヘッダー行が空(壊れている)なら自己修復する。
-  // (手動でシートを作った/一部だけ消してしまった等のケースに対応)
   try {
     await sheet.loadHeaderRow();
   } catch (e) {
+    console.error(`[${sheetName}] ヘッダー読み込みエラーの詳細: ` + e.message);
     if (String(e.message).includes('No values in the header row')) {
       await sheet.setHeaderRow(headerValues);
       await sheet.loadHeaderRow();
