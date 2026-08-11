@@ -216,6 +216,13 @@
 
     await loadStores();
     updateFooterButtonState();
+
+    // ▼▼▼ 一時的なデバッグ表示(原因特定できたら削除する) ▼▼▼
+    const debugEl = document.createElement('p');
+    debugEl.style.cssText = 'font-size:10px; color:#c00; word-break:break-all; padding:8px; background:#fee; margin:8px 16px;';
+    debugEl.textContent = 'DEBUG userId=' + (currentLineUserId || '(取得失敗)') + ' / editable=' + JSON.stringify(editableStoreIds);
+    document.body.insertBefore(debugEl, document.body.firstChild);
+    // ▲▲▲ ここまで ▲▲▲
   }
 
   // 現在選択中の店舗が編集可能かどうかで、フッター編集ボタンの有効/無効を切り替える
