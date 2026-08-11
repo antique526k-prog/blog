@@ -226,9 +226,106 @@ async function updateStylistCache(storeId, stylists) {
   }
 }
 
+// ============================================
+// スタッフ (店長・スタッフのアクセス権限)
+// ============================================
+
+/**
+ * LINEユーザーIDから、そのユーザーが管理している店舗IDの一覧を取得する
+ * @param {string} lineUserId
+ * @returns {Promise<string[]>} 管理している店舗IDの配列(該当なしなら空配列)
+ */
+/**
+ * LINEユーザーIDから、そのユーザーが編集権限を持つ店舗IDの一覧を取得する。
+ * 既存の「スタッフ」シート(利用者登録シート)を流用しており、
+ * 新規のシートは作らない。
+ * 列: "LINE userId" / "氏名" / "店舗" / "登録日時" / "種別" / "role"
+ * "店舗"列の値は config/stores.js の store_id (style, ritta, merry等)と一致している前提。
+ *
+ * 権限ルール:
+ * - role が "owner" の場合、会社全体の代表者とみなし、
+ *   シートの登録店舗に関わらず「全店舗」を編集可能とする。
+ * - role が "manager" の場合、そのユーザーIDに紐づく担当店舗のみ編集可能とする。
+ * - role が "staff" の場合は編集権限なし(空配列)。
+ * @param {string} lineUserId
+ * @returns {Promise<string[]>} 編集権限のある店舗IDの配列(該当なしなら空配列)
+ */
+async function getManagedStoreIds(lineUserId) {
+  if (!lineUserId) return [];
+
+  const doc = await getSpreadsheetDoc();
+  const sheet = doc.sheetsByTitle['スタッフ'];
+  if (!sheet) return [];
+
+  await sheet.loadHeaderRow();
+  const rows = await sheet.getRows();
+
+  const myRows = rows.filter((row) => row.get('LINE userId') === lineUserId);
+  if (myRows.length === 0) return [];
+
+  const isOwner = myRows.some((row) => row.get('role') === 'owner');
+  if (isOwner) {
+    // config/stores.js から全店舗IDを取得して返す
+    const { STORE_CONFIG } = require('../config/stores');
+    return Object.keys(STORE_CONFIG);
+  }
+
+  return myRows
+    .filter((row) => row.get('role') === 'manager')
+    .map((row) => row.get('店舗'))
+    .filter(Boolean);
+}
+
+// ============================================
+// footer_master (編集用: 生のテキストの取得・更新)
+// ============================================
+
+/**
+ * 指定店舗の、編集画面表示用のフッター生テキストを1件取得する。
+ * (getFooterText()は複数行を結合して返す「表示用」だが、
+ *  こちらは編集フォームに出す「その店舗の1行だけ」を返す)
+ * @param {string} storeId
+ * @returns {Promise<string>} 見つからなければ空文字
+ */
+async function getFooterTextForEdit(storeId) {
+  const doc = await getSpreadsheetDoc();
+  const sheet = await getOrCreateSheet(doc, 'footer_master', ['store_id', 'footer_text', 'is_active', 'priority']);
+  const rows = await sheet.getRows();
+
+  const row = rows.find((r) => r.get('store_id') === storeId);
+  return row ? row.get('footer_text') || '' : '';
+}
+
+/**
+ * 指定店舗のフッターテキストを更新する。該当行がなければ新規作成する。
+ * @param {string} storeId
+ * @param {string} newText
+ */
+async function updateFooterText(storeId, newText) {
+  const doc = await getSpreadsheetDoc();
+  const sheet = await getOrCreateSheet(doc, 'footer_master', ['store_id', 'footer_text', 'is_active', 'priority']);
+  const rows = await sheet.getRows();
+
+  const row = rows.find((r) => r.get('store_id') === storeId);
+  if (row) {
+    row.set('footer_text', newText);
+    await row.save();
+  } else {
+    await sheet.addRow({
+      store_id: storeId,
+      footer_text: newText,
+      is_active: 'TRUE',
+      priority: 1,
+    });
+  }
+}
+
 module.exports = {
   getFooterText,
   logPublishResult,
   getCachedStylists,
   updateStylistCache,
+  getManagedStoreIds,
+  getFooterTextForEdit,
+  updateFooterText,
 };
