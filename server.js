@@ -41,6 +41,7 @@ const storesRouter = require('./routes/stores');
 const stylistsRouter = require('./routes/stylists');
 const myStoresRouter = require('./routes/myStores');
 const footerRouter = require('./routes/footer');
+const reviewsRouter = require('./routes/reviews');
 
 app.use('/api/generate', generateRouter);
 app.use('/api/publish', publishRouter);
@@ -48,6 +49,7 @@ app.use('/api/stores', storesRouter);
 app.use('/api/stylists', stylistsRouter);
 app.use('/api/my-stores', myStoresRouter);
 app.use('/api/footer', footerRouter);
+app.use('/api/reviews', reviewsRouter);
 
 // LIFF ID等、フロントエンドが必要とする軽量な設定値を返す
 app.get('/api/config', (req, res) => {
