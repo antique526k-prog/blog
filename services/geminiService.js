@@ -89,4 +89,58 @@ async function extractGeminiText(response) {
   return parts[0].text.trim();
 }
 
-module.exports = { generateAnalysisAndBlog };
+// ============================================
+// PART 2: geminiService.js に追加
+// ============================================
+// (このファイルの const fetch / GEMINI_MODEL / extractGeminiText は
+//  geminiService.js に既にあるものをそのまま使う。重複定義しないこと)
+//
+// ★ファイル先頭のimport行も、以下のように buildReviewReplyPrompt を追加すること:
+//   const { buildAnalysisPrompt, buildBlogPrompt, getSeasonContext, buildReviewReplyPrompt } = require('./promptBuilder');
+ 
+/**
+ * 口コミへの返信ドラフトを1件生成する
+ * @param {object} review {nickname, body, scores}
+ * @param {string} storeName
+ * @param {string} staffName
+ * @returns {Promise<string>} 返信文(500字以内を想定。念のため呼び出し側でも文字数チェック推奨)
+ */
+async function generateReviewReplyDraft(review, storeName, staffName) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('環境変数 GEMINI_API_KEY が設定されていません');
+ 
+  const endpoint =
+    'https://generativelanguage.googleapis.com/v1beta/models/' +
+    GEMINI_MODEL +
+    ':generateContent?key=' +
+    apiKey;
+ 
+  const prompt = buildReviewReplyPrompt(review, storeName, staffName);
+ 
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+    }),
+  });
+ 
+  const draft = await extractGeminiText(res);
+ 
+  // 500字を超えていた場合の安全策(呼び出し側のUIでも編集できるが、念のためログに残す)
+  if (draft.length > 500) {
+    console.warn(
+      `生成された返信ドラフトが500字を超えています(${draft.length}字)。LIFF側での編集が必要です。`
+    );
+  }
+ 
+  return draft;
+}
+ 
+// geminiService.js の module.exports に generateReviewReplyDraft を追加すること:
+//   module.exports = { generateAnalysisAndBlog, generateReviewReplyDraft };
+ 
+// promptBuilder.js の module.exports に buildReviewReplyPrompt を追加すること:
+//   module.exports = { buildAnalysisPrompt, buildBlogPrompt, getSeasonContext, buildReviewReplyPrompt };
+module.exports = { generateAnalysisAndBlog, generateReviewReplyDraft };
+
