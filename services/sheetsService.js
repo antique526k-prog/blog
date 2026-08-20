@@ -520,6 +520,42 @@ function numOrUndefined(v) {
   return Number.isNaN(n) ? undefined : n;
 }
 
+/**
+ * 【追加分】sheetsService.js に追加。module.exports の手前に貼り付け、
+ * exportsに getStaffProfileByLineUserId を追加すること。
+ *
+ * 既存の「スタッフ」タブ(LINE userId | 氏名 | 店舗 | 登録日時 | 種別 | role)
+ * から、LINE userIdに対応する氏名・店舗を引く。
+ */
+
+/**
+ * LINE userIdに対応する担当者情報を取得する。
+ * @param {string} lineUserId
+ * @returns {Promise<{staffName: string, storeId: string, role: string}|null>}
+ */
+async function getStaffProfileByLineUserId(lineUserId) {
+  const doc = await getSpreadsheetDoc();
+  const sheet = await getOrCreateSheet(doc, 'スタッフ', [
+    'LINE userId',
+    '氏名',
+    '店舗',
+    '登録日時',
+    '種別',
+    'role',
+  ]);
+  const rows = await sheet.getRows();
+
+  const row = rows.find((r) => r.get('LINE userId') === lineUserId);
+  if (!row) return null;
+
+  return {
+    staffName: row.get('氏名'),
+    storeId: row.get('店舗'),
+    role: row.get('role'),
+  };
+}
+
+// module.exports に追加すること: getStaffProfileByLineUserId,
 module.exports = {
   getFooterText,
   logPublishResult,
@@ -534,4 +570,5 @@ module.exports = {
   updateReviewDraft,
   removeReviewFromCache,
   logReviewReply,
+  getStaffProfileByLineUserId,
 };
