@@ -25,6 +25,7 @@ const {
   updateReviewDraft,
   removeReviewFromCache,
   logReviewReply,
+  getStaffProfileByLineUserId,
 } = require('../services/sheetsService');
 const {
   loginHQAndGetPage,
@@ -92,6 +93,36 @@ async function refreshStoreReviews(store, storeId) {
     await browser.close();
   }
 }
+
+/**
+ * GET /api/reviews/me?lineUserId=xxx
+ * LINEアカウントに対応する担当者名・店舗を返す(LIFF起動時にまず呼ぶ)。
+ * 「スタッフ」タブ(LINE userId | 氏名 | 店舗 | 登録日時 | 種別 | role)を参照。
+ *
+ * ルート定義順の注意: Expressは上から順にマッチするため、
+ * 可変パラメータの ':storeId' より前にこの固定パス 'me' を置くこと。
+ * (逆にすると 'me' が :storeId として誤って解釈されてしまう)
+ */
+router.get('/me', async (req, res) => {
+  try {
+    const { lineUserId } = req.query;
+    if (!lineUserId) {
+      return res.status(400).json({ success: false, error: 'lineUserId クエリパラメータが必要です' });
+    }
+
+    const profile = await getStaffProfileByLineUserId(lineUserId);
+    if (!profile) {
+      return res
+        .status(404)
+        .json({ success: false, error: 'このLINEアカウントに紐づく担当者情報が見つかりません' });
+    }
+
+    res.json({ success: true, ...profile });
+  } catch (err) {
+    console.error('担当者情報取得エラー: ' + err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 router.get('/:storeId', async (req, res) => {
   try {
