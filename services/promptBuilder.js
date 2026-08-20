@@ -185,4 +185,4 @@ function buildReviewReplyPrompt(review, storeName, staffName) {
   ].join('\n');
 }
 
-module.exports = { buildAnalysisPrompt, buildBlogPrompt, getSeasonContext };
+module.exports = { buildAnalysisPrompt, buildBlogPrompt, getSeasonContext, buildReviewReplyPrompt };
