@@ -319,6 +319,206 @@ async function updateFooterText(storeId, newText) {
     });
   }
 }
+/**
+ * ============================================
+ * 【追加分】口コミ関連のキャッシュ・ログ
+ * sheetsService.js の既存コード(getSpreadsheetDoc, getOrCreateSheet)を
+ * そのまま再利用する前提。この内容を sheetsService.js の
+ * module.exports の手前に貼り付けてください。
+ *
+ * 管理するシート(新規):
+ * - review_cache     : 未返信口コミ+AIドラフトのキャッシュ(店舗ごと、TTL付き)
+ * - review_reply_log : 実際に投稿した返信の記録(監査ログ)
+ * ============================================
+ */
+
+const REVIEW_CACHE_TTL_MS = 30 * 60 * 1000; // 30分。stylist_cacheより短くしている
+// (口コミは新着が入り次第、担当者になるべく早く見えてほしいため)
+
+const REVIEW_CACHE_HEADERS = [
+  'store_id',
+  'review_id',
+  'staff',
+  'nickname',
+  'visit_date',
+  'score_atmosphere',
+  'score_service',
+  'score_skill',
+  'score_price',
+  'score_overall',
+  'body',
+  'ai_draft',
+  'updated_at',
+];
+
+const REVIEW_REPLY_LOG_HEADERS = [
+  'timestamp',
+  'store_id',
+  'review_id',
+  'staff',
+  'nickname',
+  'reply_content',
+  'result',
+];
+
+/**
+ * 店舗の未返信口コミキャッシュを取得する。
+ * 有効期限内(30分以内)ならキャッシュを返し、古い/存在しない場合は null を返す。
+ * @param {string} storeId
+ * @returns {Promise<Array<object>|null>}
+ */
+async function getCachedUnrepliedReviews(storeId) {
+  const doc = await getSpreadsheetDoc();
+  const sheet = await getOrCreateSheet(doc, 'review_cache', REVIEW_CACHE_HEADERS);
+  const rows = await sheet.getRows();
+
+  const storeRows = rows.filter((row) => row.get('store_id') === storeId);
+  if (storeRows.length === 0) return null;
+
+  const latestUpdatedAt = storeRows
+    .map((row) => new Date(row.get('updated_at')).getTime())
+    .reduce((max, t) => Math.max(max, t), 0);
+
+  const age = Date.now() - latestUpdatedAt;
+  if (age > REVIEW_CACHE_TTL_MS) return null; // 期限切れ
+
+  return storeRows.map(rowToReviewObject);
+}
+
+/**
+ * 特定担当者の未返信口コミだけを取得する(LIFF表示用)。
+ * キャッシュが無い/古い場合は null を返すので、呼び出し側で
+ * fetchUnrepliedReviewSummaries 等を使って再取得すること。
+ * @param {string} storeId
+ * @param {string} staffName
+ * @returns {Promise<Array<object>|null>}
+ */
+async function getCachedUnrepliedReviewsForStaff(storeId, staffName) {
+  const all = await getCachedUnrepliedReviews(storeId);
+  if (all === null) return null;
+  return all.filter((r) => r.staff === staffName);
+}
+
+/**
+ * 店舗の未返信口コミキャッシュを丸ごと更新する(スナップショット方式)。
+ * 既存の当該店舗の行を削除してから、新しい内容で書き直す。
+ * @param {string} storeId
+ * @param {Array<object>} reviews [{reviewId, staff, nickname, visitDate, scores, body, aiDraft}]
+ */
+async function updateReviewCache(storeId, reviews) {
+  const doc = await getSpreadsheetDoc();
+  const sheet = await getOrCreateSheet(doc, 'review_cache', REVIEW_CACHE_HEADERS);
+  const rows = await sheet.getRows();
+
+  // 対象店舗の既存行を削除(後ろから削除しないとインデックスがずれる)
+  const storeRows = rows.filter((row) => row.get('store_id') === storeId);
+  for (let i = storeRows.length - 1; i >= 0; i--) {
+    await storeRows[i].delete();
+  }
+
+  const now = new Date().toISOString();
+  const newRows = reviews.map((r) => ({
+    store_id: storeId,
+    review_id: r.reviewId,
+    staff: r.staff || '',
+    nickname: r.nickname || '',
+    visit_date: r.visitDate || '',
+    score_atmosphere: r.scores?.['雰囲気'] ?? '',
+    score_service: r.scores?.['接客サービス'] ?? '',
+    score_skill: r.scores?.['技術・仕上がり'] ?? '',
+    score_price: r.scores?.['メニュー・料金'] ?? '',
+    score_overall: r.scores?.['総合満足度'] ?? '',
+    body: r.body || '',
+    ai_draft: r.aiDraft || '',
+    updated_at: now,
+  }));
+
+  if (newRows.length > 0) {
+    await sheet.addRows(newRows);
+  }
+}
+
+/**
+ * 個別の口コミ1件だけドラフトを更新する(「作り直す」ボタン用)。
+ * 対象行を探して ai_draft と updated_at だけ書き換える。
+ * @param {string} storeId
+ * @param {string} reviewId
+ * @param {string} newDraft
+ */
+async function updateReviewDraft(storeId, reviewId, newDraft) {
+  const doc = await getSpreadsheetDoc();
+  const sheet = await getOrCreateSheet(doc, 'review_cache', REVIEW_CACHE_HEADERS);
+  const rows = await sheet.getRows();
+
+  const target = rows.find(
+    (row) => row.get('store_id') === storeId && row.get('review_id') === reviewId
+  );
+  if (!target) {
+    throw new Error(`review_cache に該当行が見つかりません: store=${storeId}, reviewId=${reviewId}`);
+  }
+  target.set('ai_draft', newDraft);
+  target.set('updated_at', new Date().toISOString());
+  await target.save();
+}
+
+/**
+ * 投稿完了した口コミをキャッシュから取り除く(次回一覧に出さないため)。
+ * @param {string} storeId
+ * @param {string} reviewId
+ */
+async function removeReviewFromCache(storeId, reviewId) {
+  const doc = await getSpreadsheetDoc();
+  const sheet = await getOrCreateSheet(doc, 'review_cache', REVIEW_CACHE_HEADERS);
+  const rows = await sheet.getRows();
+
+  const target = rows.find(
+    (row) => row.get('store_id') === storeId && row.get('review_id') === reviewId
+  );
+  if (target) await target.delete();
+}
+
+/**
+ * 投稿結果を監査ログに記録する。
+ * @param {{storeId: string, reviewId: string, staff: string, nickname: string, replyContent: string, result: 'success'|'error'}} entry
+ */
+async function logReviewReply(entry) {
+  const doc = await getSpreadsheetDoc();
+  const sheet = await getOrCreateSheet(doc, 'review_reply_log', REVIEW_REPLY_LOG_HEADERS);
+  await sheet.addRow({
+    timestamp: new Date().toISOString(),
+    store_id: entry.storeId,
+    review_id: entry.reviewId,
+    staff: entry.staff || '',
+    nickname: entry.nickname || '',
+    reply_content: entry.replyContent || '',
+    result: entry.result || '',
+  });
+}
+
+function rowToReviewObject(row) {
+  return {
+    reviewId: row.get('review_id'),
+    staff: row.get('staff'),
+    nickname: row.get('nickname'),
+    visitDate: row.get('visit_date'),
+    scores: {
+      雰囲気: numOrUndefined(row.get('score_atmosphere')),
+      接客サービス: numOrUndefined(row.get('score_service')),
+      '技術・仕上がり': numOrUndefined(row.get('score_skill')),
+      'メニュー・料金': numOrUndefined(row.get('score_price')),
+      総合満足度: numOrUndefined(row.get('score_overall')),
+    },
+    body: row.get('body'),
+    aiDraft: row.get('ai_draft'),
+    updatedAt: row.get('updated_at'),
+  };
+}
+
+function numOrUndefined(v) {
+  if (v === undefined || v === null || v === '') return undefined;
+  const n = Number(v);
+  return Number.isNaN(n) ? undefined : n;
+}
 
 module.exports = {
   getFooterText,
@@ -328,4 +528,10 @@ module.exports = {
   getManagedStoreIds,
   getFooterTextForEdit,
   updateFooterText,
+  getCachedUnrepliedReviews,
+  getCachedUnrepliedReviewsForStaff,
+  updateReviewCache,
+  updateReviewDraft,
+  removeReviewFromCache,
+  logReviewReply,
 };
