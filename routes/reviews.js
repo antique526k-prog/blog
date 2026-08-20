@@ -1,0 +1,187 @@
+/**
+ * ============================================
+ * GET  /api/reviews/:storeId?staff=XXX
+ *   指定店舗・担当者の未返信口コミ+AIドラフトを返す(LIFF一覧表示用)
+ * POST /api/reviews/:storeId/:reviewId/regenerate-draft
+ *   AIドラフトを1件だけ作り直す
+ * POST /api/reviews/:storeId/:reviewId/post
+ *   スタッフが確認・編集した内容で実際にSalonBoardへ返信を投稿する
+ *
+ * 【本部アカウントについて】
+ * config/stores.js の店舗別ログイン(store.salonboard)とは別に、
+ * 本部アカウント1つで全店舗の口コミにアクセスする方針のため、
+ * 環境変数 SALONBOARD_HQ_ID / SALONBOARD_HQ_PASSWORD_1 / _2 を
+ * Renderに設定しておくこと。
+ * ============================================
+ */
+
+const express = require('express');
+const router = express.Router();
+const { getStoreConfig } = require('../config/stores');
+const {
+  getCachedUnrepliedReviewsForStaff,
+  getCachedUnrepliedReviews,
+  updateReviewCache,
+  updateReviewDraft,
+  removeReviewFromCache,
+  logReviewReply,
+} = require('../services/sheetsService');
+const {
+  loginHQAndGetPage,
+  switchToStore,
+  fetchUnrepliedReviewSummaries,
+  fetchReviewDetail,
+  postReviewReply,
+} = require('../services/salonboardService');
+const { generateReviewReplyDraft } = require('../services/geminiService');
+
+const HQ_SALONBOARD_CONFIG = {
+  loginId: process.env.SALONBOARD_HQ_ID,
+  passwords: [
+    process.env.SALONBOARD_HQ_PASSWORD_1,
+    process.env.SALONBOARD_HQ_PASSWORD_2,
+  ].filter(Boolean),
+};
+
+// config/stores.js の hotpepperSalonId は "sln" + 店舗ID(例: slnH000056993) の形式。
+// 口コミチェックで使う店舗IDは "sln" を除いた部分(サロン一覧のリンクid属性と同じ)。
+function groupSalonId(store) {
+  return (store.hotpepperSalonId || '').replace(/^sln/, '');
+}
+
+/**
+ * 店舗の未返信口コミを実際にSalonBoardから取得し、AIドラフトも生成してキャッシュを更新する。
+ * @param {object} store config/stores.js の1店舗分の設定
+ * @param {string} storeId
+ * @returns {Promise<Array<object>>}
+ */
+async function refreshStoreReviews(store, storeId) {
+  const { browser, page } = await loginHQAndGetPage(HQ_SALONBOARD_CONFIG);
+  try {
+    await switchToStore(page, groupSalonId(store));
+    const { reviews: summaries } = await fetchUnrepliedReviewSummaries(page);
+
+    const detailed = [];
+    for (const s of summaries) {
+      if (!s.reviewId) continue;
+
+      const detail = await fetchReviewDetail(page, s.reviewId);
+      const reviewForDraft = { nickname: detail.nickname, body: detail.body, scores: detail.scores };
+
+      let aiDraft = '';
+      try {
+        aiDraft = await generateReviewReplyDraft(reviewForDraft, store.name, s.staff);
+      } catch (draftErr) {
+        // ドラフト生成に失敗しても口コミ自体は表示したいので、空文字のまま続行する
+        console.error(`ドラフト生成失敗(reviewId=${s.reviewId}): ` + draftErr.message);
+      }
+
+      detailed.push({
+        reviewId: s.reviewId,
+        staff: s.staff,
+        nickname: detail.nickname,
+        body: detail.body,
+        scores: detail.scores,
+        aiDraft,
+      });
+    }
+
+    await updateReviewCache(storeId, detailed);
+    return detailed;
+  } finally {
+    await browser.close();
+  }
+}
+
+router.get('/:storeId', async (req, res) => {
+  try {
+    const { storeId } = req.params;
+    const { staff } = req.query;
+    if (!staff) {
+      return res.status(400).json({ success: false, error: 'staff クエリパラメータが必要です' });
+    }
+
+    const store = getStoreConfig(storeId);
+
+    const cached = await getCachedUnrepliedReviewsForStaff(storeId, staff);
+    if (cached) {
+      return res.json({ success: true, reviews: cached, source: 'cache' });
+    }
+
+    const refreshed = await refreshStoreReviews(store, storeId);
+    const forStaff = refreshed.filter((r) => r.staff === staff);
+    res.json({ success: true, reviews: forStaff, source: 'live' });
+  } catch (err) {
+    console.error('口コミ一覧取得エラー: ' + err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.post('/:storeId/:reviewId/regenerate-draft', async (req, res) => {
+  try {
+    const { storeId, reviewId } = req.params;
+    const store = getStoreConfig(storeId);
+
+    const cached = await getCachedUnrepliedReviews(storeId);
+    const target = cached ? cached.find((r) => r.reviewId === reviewId) : null;
+    if (!target) {
+      return res
+        .status(404)
+        .json({ success: false, error: '対象の口コミがキャッシュに見つかりません(一覧を再読み込みしてください)' });
+    }
+
+    const newDraft = await generateReviewReplyDraft(
+      { nickname: target.nickname, body: target.body, scores: target.scores },
+      store.name,
+      target.staff
+    );
+    await updateReviewDraft(storeId, reviewId, newDraft);
+    res.json({ success: true, draft: newDraft });
+  } catch (err) {
+    console.error('ドラフト再生成エラー: ' + err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.post('/:storeId/:reviewId/post', async (req, res) => {
+  const { storeId, reviewId } = req.params;
+  const { staff, nickname, replyContent, replyFrom } = req.body;
+
+  if (!replyContent || !replyContent.trim()) {
+    return res.status(400).json({ success: false, error: '返信内容が空です' });
+  }
+  if (replyContent.length > 500) {
+    return res
+      .status(400)
+      .json({ success: false, error: `返信内容が500字を超えています(${replyContent.length}字)` });
+  }
+
+  // Puppeteer処理(ログイン〜投稿)は数十秒かかることがあるため、
+  // publish.js と同じく即座に受付レスポンスを返し、実処理はバックグラウンドで継続する。
+  res.json({ success: true, message: '投稿を受け付けました' });
+
+  (async () => {
+    let result = 'error';
+    try {
+      const store = getStoreConfig(storeId);
+      const { browser, page } = await loginHQAndGetPage(HQ_SALONBOARD_CONFIG);
+      try {
+        await switchToStore(page, groupSalonId(store));
+        await postReviewReply(page, reviewId, { replyContent, replyFrom });
+        result = 'success';
+      } finally {
+        await browser.close();
+      }
+      await removeReviewFromCache(storeId, reviewId);
+      console.log(`口コミ投稿完了: store=${storeId}, reviewId=${reviewId}, staff=${staff}`);
+    } catch (err) {
+      console.error(`口コミ投稿エラー(store=${storeId}, reviewId=${reviewId}): ` + err.message);
+    } finally {
+      await logReviewReply({ storeId, reviewId, staff, nickname, replyContent, result }).catch((e) =>
+        console.error('ログ記録エラー: ' + e.message)
+      );
+    }
+  })();
+});
+
+module.exports = router;
