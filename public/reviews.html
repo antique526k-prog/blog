@@ -190,7 +190,12 @@
 <div id="toast"></div>
 
 <script>
-let LIFF_ID = null;
+// この画面専用のLIFF ID。
+// 【重要】/api/config はブログ用のLIFF IDしか返さないため、ここでは使わない。
+// (共有のconfigエンドポイントを使うと、liff.init()がブログ側のLIFF IDで
+//  初期化されてしまい、LIFF SDKが「URLとLIFF IDの対応が違う」と判断して
+//  ブログのエンドポイントへ自動リダイレクトしてしまう不具合があった)
+const LIFF_ID = '2010556064-L4SAkv9q';
 let currentLineUserId = null;
 let staffName = null;
 let storeId = null;
@@ -207,15 +212,6 @@ const scoreKeyMap = {
 async function init() {
   const statusEl = document.getElementById('statusLine');
   try {
-    const configRes = await fetch('/api/config');
-    const configData = await configRes.json();
-    LIFF_ID = configData.liffId;
-
-    if (!LIFF_ID) {
-      statusEl.textContent = 'LIFF設定が見つかりません(管理者にご確認ください)';
-      return;
-    }
-
     await liff.init({ liffId: LIFF_ID }).catch(function (err) {
       console.error('LIFF init error', err);
     });
