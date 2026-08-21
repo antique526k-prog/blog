@@ -529,12 +529,26 @@ async function loginHQAndGetPage(hqSalonboardConfig) {
 
 // ===== サロン一覧から指定店舗に切り替える =====
 async function switchToStore(page, salonId) {
-  await page.goto(GROUP_TOP_URL, { waitUntil: 'networkidle2' });
-  await page.evaluate((id) => {
-    const el = document.getElementById(id);
-    if (el) el.click();
-  }, salonId);
-  await waitForPageStable(page);
+      await page.goto(GROUP_TOP_URL, { waitUntil: 'networkidle2' });
+      const [clicked] = await Promise.all([
+              page.evaluate((id) => {
+                        const el = document.getElementById(id);
+                        if (el) {
+                                    el.click();
+                                    return true;
+                        }
+                        return false;
+              }, salonId),
+            ]);
+      if (!clicked) {
+              throw new Error(
+                        `店舗ID "${salonId}" のリンクがサロン一覧(${GROUP_TOP_URL})に見つかりませんでした。config/stores.jsのhotpepperSalonIdを確認してください。`
+                      );
+      }
+      await waitForPageStable(page);
+      // 店舗切り替え後、口コミ一覧など次のページ操作の前に少し待つ
+      // (headless環境ではnetworkidle2判定後もDOM描画が追いついていないことがあるため)
+      await new Promise((r) => setTimeout(r, 800));
 }
 
 // ===== 現在のページから口コミ1件分の担当者名・管理番号を抜き出す =====
@@ -566,7 +580,14 @@ async function extractReviewSummariesFromPage(page) {
 async function fetchUnrepliedReviewSummaries(page) {
   await page.goto(REVIEW_LIST_URL, { waitUntil: 'networkidle2' });
 
-  await page.select('#reviewCategoryCd', '2'); // 2 = 未返信の口コミ
+  try {
+          await page.waitForSelector('#reviewCategoryCd', { timeout: 15000 });
+  } catch (e) {
+          throw new Error(
+                    `口コミ一覧ページに #reviewCategoryCd が見つかりませんでした(現在のURL: ${page.url()})。店舗切り替えが正しく完了していない可能性があります。`
+                  );
+  }
+      await page.select('#reviewCategoryCd', '2'); // 2 = 未返信の口コミ
   await page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {});
   await new Promise((r) => setTimeout(r, 800));
 
