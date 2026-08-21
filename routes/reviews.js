@@ -19,8 +19,8 @@ const express = require('express');
 const router = express.Router();
 const { getStoreConfig } = require('../config/stores');
 const {
-  getCachedUnrepliedReviewsForStaff,
   getCachedUnrepliedReviews,
+  getCachedUnrepliedReviewsAnyAge,
   updateReviewCache,
   updateReviewDraft,
   removeReviewFromCache,
@@ -51,7 +51,7 @@ function groupSalonId(store) {
 }
 
 /**
- * 店舗の未返信口コミを実際にSalonBoardから取得し、AIドラフトも生成してキャッシュを更新する。
+ * 店舗の未返信口コミ+AIドラフトを返す(LIFF一覧表示用)。
  * @param {object} store config/stores.js の1店舗分の設定
  * @param {string} storeId
  * @returns {Promise<Array<object>>}
@@ -134,14 +134,30 @@ router.get('/:storeId', async (req, res) => {
 
     const store = getStoreConfig(storeId);
 
-    const cached = await getCachedUnrepliedReviewsForStaff(storeId, staff);
-    if (cached) {
-      return res.json({ success: true, reviews: cached, source: 'cache' });
+    // キャッシュを鮮度に関わらず取得(stale-while-revalidate方式)。
+    // 完全に初回(キャッシュが1件も無い)の時だけ、その場で同期的に取得する。
+    const cached = await getCachedUnrepliedReviewsAnyAge(storeId);
+
+    if (cached === null) {
+      const refreshed = await refreshStoreReviews(store, storeId);
+      const forStaff = refreshed.filter((r) => r.staff === staff);
+      return res.json({ success: true, reviews: forStaff, source: 'live-initial' });
     }
 
-    const refreshed = await refreshStoreReviews(store, storeId);
-    const forStaff = refreshed.filter((r) => r.staff === staff);
-    res.json({ success: true, reviews: forStaff, source: 'live' });
+    // キャッシュがあれば古くても即座に返す(体感速度優先)
+    const forStaff = cached.reviews.filter((r) => r.staff === staff);
+    res.json({
+      success: true,
+      reviews: forStaff,
+      source: cached.isStale ? 'cache-stale' : 'cache-fresh',
+    });
+
+    // 古い場合はレスポンスを返した後、裏でこっそり更新しておく(次回アクセス時のため)
+    if (cached.isStale) {
+      refreshStoreReviews(store, storeId).catch((err) => {
+        console.error(`バックグラウンド更新エラー(store=${storeId}): ` + err.message);
+      });
+    }
   } catch (err) {
     console.error('口コミ一覧取得エラー: ' + err.message);
     res.status(500).json({ success: false, error: err.message });
