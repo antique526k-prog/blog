@@ -604,6 +604,7 @@ module.exports = {
   getFooterTextForEdit,
   updateFooterText,
   getCachedUnrepliedReviews,
+    getCachedUnrepliedReviewsAnyAge,
   getCachedUnrepliedReviewsForStaff,
   updateReviewCache,
   updateReviewDraft,
