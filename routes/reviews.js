@@ -17,7 +17,7 @@
 
 const express = require('express');
 const router = express.Router();
-const { getStoreConfig } = require('../config/stores');
+const { getStoreConfig, listStores } = require('../config/stores');
 const {
   getCachedUnrepliedReviews,
   getCachedUnrepliedReviewsAnyAge,
@@ -123,6 +123,55 @@ router.get('/me', async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
+  /**
+     * GET /api/reviews/all?lineUserId=xxx
+        * オーナー権限(「スタッフ」タブのrole列がowner)のユーザーのみ、
+           * 8店舗全部・全担当者分の未返信口コミをまとめて返す。
+              *
+                 * ルート定義順の注意: 'me' と同じく、可変パラメータの ':storeId' より
+                    * 前にこの固定パス 'all' を置くこと。
+                       */
+  router.get('/all', async (req, res) => {
+        try {
+                const { lineUserId } = req.query;
+                if (!lineUserId) {
+                          return res.status(400).json({ success: false, error: 'lineUserId クエリパラメータが必要です' });
+                }
+
+                const profile = await getStaffProfileByLineUserId(lineUserId);
+                if (!profile || profile.role !== 'owner') {
+                          return res.status(403).json({ success: false, error: 'この画面を見る権限がありません' });
+                }
+
+                const allStores = listStores();
+                const results = [];
+
+                for (const { id: storeId } of allStores) {
+                          const store = getStoreConfig(storeId);
+                          const cached = await getCachedUnrepliedReviewsAnyAge(storeId);
+
+                          let reviews;
+                          if (cached === null) {
+                                      reviews = await refreshStoreReviews(store, storeId);
+                          } else {
+                                      reviews = cached.reviews;
+                                      if (cached.isStale) {
+                                                    refreshStoreReviews(store, storeId).catch((err) => {
+                                                                    console.error(`バックグラウンド更新エラー(store=${storeId}): ` + err.message);
+                                                    });
+                                      }
+                          }
+
+                          reviews.forEach((r) => results.push({ ...r, storeId, storeName: store.name }));
+                }
+
+                res.json({ success: true, reviews: results });
+        } catch (err) {
+                console.error('全件取得エラー: ' + err.message);
+                res.status(500).json({ success: false, error: err.message });
+        }
+  });
 
 router.get('/:storeId', async (req, res) => {
   try {
