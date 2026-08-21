@@ -555,6 +555,45 @@ async function getStaffProfileByLineUserId(lineUserId) {
   };
 }
 
+/**
+ * 【追加分】sheetsService.js に追加。module.exports の手前に貼り付け、
+ * exportsに getCachedUnrepliedReviewsAnyAge を追加すること。
+ *
+ * 既存の getCachedUnrepliedReviews は「30分以内でなければnullを返す」ため、
+ * 呼び出し側はキャッシュが古いと必ずSalonBoardへの同期取得を待つことになり、
+ * LIFF表示が遅くなる原因になっていた。
+ *
+ * この関数は鮮度に関わらずキャッシュをそのまま返し、isStaleフラグで
+ * 「古いかどうか」だけを伝える。呼び出し側(routes/reviews.js)で
+ * 「古くても一旦表示 → 裏で更新」のstale-while-revalidate方式に使う。
+ */
+
+/**
+ * 店舗の未返信口コミキャッシュを、鮮度に関わらず取得する。
+ * @param {string} storeId
+ * @returns {Promise<{reviews: Array<object>, isStale: boolean}|null>} キャッシュが1件も無ければnull
+ */
+async function getCachedUnrepliedReviewsAnyAge(storeId) {
+  const doc = await getSpreadsheetDoc();
+  const sheet = await getOrCreateSheet(doc, 'review_cache', REVIEW_CACHE_HEADERS);
+  const rows = await sheet.getRows();
+
+  const storeRows = rows.filter((row) => row.get('store_id') === storeId);
+  if (storeRows.length === 0) return null;
+
+  const latestUpdatedAt = storeRows
+    .map((row) => new Date(row.get('updated_at')).getTime())
+    .reduce((max, t) => Math.max(max, t), 0);
+
+  const isStale = Date.now() - latestUpdatedAt > REVIEW_CACHE_TTL_MS;
+
+  return {
+    reviews: storeRows.map(rowToReviewObject),
+    isStale,
+  };
+}
+
+// module.exports に追加すること: getCachedUnrepliedReviewsAnyAge,
 // module.exports に追加すること: getStaffProfileByLineUserId,
 module.exports = {
   getFooterText,
