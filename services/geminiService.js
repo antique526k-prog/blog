@@ -8,7 +8,7 @@
  */
 
 const fetch = require('node-fetch');
-const { buildAnalysisPrompt, buildBlogPrompt, getSeasonContext } = require('./promptBuilder');
+const { buildAnalysisPrompt, buildBlogPrompt, getSeasonContext, buildReviewReplyPrompt } = require('./promptBuilder');
 
 const GEMINI_MODEL = 'gemini-2.5-flash';
 
