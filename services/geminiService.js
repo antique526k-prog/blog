@@ -10,7 +10,7 @@
 const fetch = require('node-fetch');
 const { buildAnalysisPrompt, buildBlogPrompt, getSeasonContext, buildReviewReplyPrompt } = require('./promptBuilder');
 
-const GEMINI_MODEL = 'gemini-2.5-flash';
+const GEMINI_MODEL = 'gemini-3.5-flash';
 
 /**
  * 画像1枚から「スタイル分析」「ブログ文案」を同時生成する
