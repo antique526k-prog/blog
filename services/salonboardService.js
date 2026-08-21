@@ -692,11 +692,8 @@ async function postReviewReply(page, reviewId, { replyContent, replyFrom = '' })
 
   await new Promise((r) => setTimeout(r, 400));
 
-  // 「確認する」。通常クリックで反応しない場合はtapElementにフォールバック。
-  const confirmClicked = await page.click('#confirm').then(() => true).catch(() => false);
-  if (!confirmClicked) {
-    await tapElement(page, '#confirm');
-  }
+  // タッチイベント専用ボタンのためtapElementで直接タップする
+  await tapElement(page, '#confirm');
   await waitForPageStable(page);
 
   const onConfirmPage = page.url().includes('/reviewReply/confirm');
@@ -714,11 +711,8 @@ async function postReviewReply(page, reviewId, { replyContent, replyFrom = '' })
     throw new Error('確認画面の内容が入力内容と一致しません。手動で確認してください。');
   }
 
-  // 「投稿する」(本番公開)。同じくタッチイベントのフォールバックあり。
-  const postClicked = await page.click('#replyComplete').then(() => true).catch(() => false);
-  if (!postClicked) {
-    await tapElement(page, '#replyComplete');
-  }
+      // 「投稿する」(本番公開)。タッチイベント専用ボタンのためtapElementで直接タップする。
+      await tapElement(page, '#replyComplete');
   await waitForPageStable(page);
 
   return { success: true };
