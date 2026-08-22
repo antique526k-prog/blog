@@ -713,9 +713,27 @@ async function postReviewReply(page, reviewId, { replyContent, replyFrom = '' })
 
   await new Promise((r) => setTimeout(r, 400));
 
-  // タッチイベント専用ボタンのためtapElementで直接タップする
-  await tapElement(page, '#confirm');
-  await waitForPageStable(page);
+  // 「確認する」。ボタンの反応方法が環境によって異なるため、
+      // 複数の方法を順に試し、URLが確認画面に変わるまで頑張る。
+      // (headless環境ではtapElementのタッチイベントが不発になることがあり、
+      //  逆に通常clickは「押せたか」をエラーで判定できないため、
+      //  実際にURLが変わったかどうかを唯一の成否判定にしている)
+      const confirmStrategies = [
+              async () => { await tapElement(page, '#confirm'); },
+              async () => { await page.click('#confirm'); },
+              async () => { await page.evaluate(() => document.querySelector('#confirm').click()); },
+            ];
+
+      for (const strategy of confirmStrategies) {
+              try {
+                        await strategy();
+              } catch (e) {
+                        // この方法が使えなかっただけなので次を試す
+              }
+              await waitForPageStable(page);
+              if (page.url().includes('/reviewReply/confirm')) break;
+              await new Promise((r) => setTimeout(r, 600));
+      }
 
   const onConfirmPage = page.url().includes('/reviewReply/confirm');
   if (!onConfirmPage) {
@@ -732,9 +750,34 @@ async function postReviewReply(page, reviewId, { replyContent, replyFrom = '' })
     throw new Error('確認画面の内容が入力内容と一致しません。手動で確認してください。');
   }
 
-      // 「投稿する」(本番公開)。タッチイベント専用ボタンのためtapElementで直接タップする。
-      await tapElement(page, '#replyComplete');
-  await waitForPageStable(page);
+      // 「投稿する」(本番公開)。確認画面と同じく複数の方法を順に試す。
+      // こちらは押した結果、確認画面URLから離脱したかどうかで成否を判定する。
+      const postStrategies = [
+              async () => { await tapElement(page, '#replyComplete'); },
+              async () => { await page.click('#replyComplete'); },
+              async () => { await page.evaluate(() => document.querySelector('#replyComplete').click()); },
+            ];
+
+      let posted = false;
+      for (const strategy of postStrategies) {
+              try {
+                        await strategy();
+              } catch (e) {
+                        // この方法が使えなかっただけなので次を試す
+              }
+              await waitForPageStable(page);
+              if (!page.url().includes('/reviewReply/confirm')) {
+                        posted = true;
+                        break;
+              }
+              await new Promise((r) => setTimeout(r, 600));
+      }
+
+      if (!posted) {
+              throw new Error(
+                        `「投稿する」ボタンの押下に失敗しました(確認画面から遷移しませんでした)。現在のURL: ${page.url()}`
+                      );
+      }
 
   return { success: true };
 }
