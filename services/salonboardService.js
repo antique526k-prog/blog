@@ -148,6 +148,50 @@ async function launchBrowser() {
   });
 }
 
+// ===== touchmoveを含む完全なタッチシーケンスを送る =====
+// 【なぜ必要か】
+// SalonBoardの「確認する」(#confirm)「投稿する」(#replyComplete)ボタンは、
+// 実機のDevToolsで getEventListeners() を確認したところ、登録されているのは
+// touchstart / touchmove / touchend の3つだけで、clickには一切反応しない。
+// 既存の tapElement() が使う page.touchscreen.tap() は touchstart と touchend しか
+// 送らないため、touchmove を待っているこれらのボタンでは処理が発火しない。
+// そこで CDP の Input.dispatchTouchEvent で3点セットを明示的に送る。
+async function tapElementWithMove(page, selector) {
+    const rect = await page.evaluate((sel) => {
+          const el = document.querySelector(sel);
+          if (!el) return null;
+          el.scrollIntoView({ block: 'center' });
+          const r = el.getBoundingClientRect();
+          return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    }, selector);
+
+    if (!rect) return false;
+
+    const client = await page.target().createCDPSession();
+    const point = { x: rect.x, y: rect.y };
+
+    await client.send('Input.dispatchTouchEvent', {
+          type: 'touchStart',
+          touchPoints: [point],
+    });
+    await new Promise((r) => setTimeout(r, 60));
+
+    // 指のわずかな揺れを再現(touchmoveリスナーを発火させるため)
+    await client.send('Input.dispatchTouchEvent', {
+          type: 'touchMove',
+          touchPoints: [{ x: rect.x + 1, y: rect.y + 1 }],
+    });
+    await new Promise((r) => setTimeout(r, 60));
+
+    await client.send('Input.dispatchTouchEvent', {
+          type: 'touchEnd',
+          touchPoints: [],
+    });
+
+    await client.detach().catch(() => {});
+    return true;
+}
+
 // ===== ログイン処理(2パスワードを順に試す) =====
 // @param {import('puppeteer').Page} page
 // @param {{loginId: string, passwords: string[]}} salonboardConfig
@@ -719,7 +763,8 @@ async function postReviewReply(page, reviewId, { replyContent, replyFrom = '' })
       //  逆に通常clickは「押せたか」をエラーで判定できないため、
       //  実際にURLが変わったかどうかを唯一の成否判定にしている)
       const confirmStrategies = [
-              async () => { await tapElement(page, '#confirm'); },
+      async () => { await tapElementWithMove(page, '#confirm'); },
+        async () => { await tapElement(page, '#confirm'); },
               async () => { await page.click('#confirm'); },
               async () => { await page.evaluate(() => document.querySelector('#confirm').click()); },
             ];
@@ -753,7 +798,8 @@ async function postReviewReply(page, reviewId, { replyContent, replyFrom = '' })
       // 「投稿する」(本番公開)。確認画面と同じく複数の方法を順に試す。
       // こちらは押した結果、確認画面URLから離脱したかどうかで成否を判定する。
       const postStrategies = [
-              async () => { await tapElement(page, '#replyComplete'); },
+      async () => { await tapElementWithMove(page, '#replyComplete'); },
+        async () => { await tapElement(page, '#replyComplete'); },
               async () => { await page.click('#replyComplete'); },
               async () => { await page.evaluate(() => document.querySelector('#replyComplete').click()); },
             ];
