@@ -50,6 +50,25 @@ function groupSalonId(store) {
   return (store.hotpepperSalonId || '').replace(/^sln/, '');
 }
 
+// ===== バックグラウンド更新の直列化キュー =====
+// 【なぜ必要か】
+// オーナーの全件表示は複数店舗のキャッシュが同時に古くなりがちで、
+// 各店舗の更新がそれぞれ「本部アカウントで新しいPuppeteerブラウザを起動して
+// ログインし直す」処理を伴う。これを何も考えずに並列実行すると、
+// Renderの小さいインスタンス上で同時に何個ものヘッドレスChromeが立ち上がり、
+// リソース不足でページが正しく読み込めなくなる(実際に8店舗同時更新で
+// 全滅した実績あり)。そのため、バックグラウンド更新は必ずこのキューを
+// 経由し、1件ずつ順番に処理する。
+let backgroundQueue = Promise.resolve();
+function queueBackgroundRefresh(store, storeId) {
+    backgroundQueue = backgroundQueue
+      .then(() => refreshStoreReviews(store, storeId))
+      .catch((err) => {
+              console.error(`バックグラウンド更新エラー(store=${storeId}): ` + err.message);
+      });
+}
+
+
 /**
  * 店舗の未返信口コミ+AIドラフトを返す(LIFF一覧表示用)。
  * @param {object} store config/stores.js の1店舗分の設定
@@ -156,16 +175,12 @@ router.get('/me', async (req, res) => {
                                               // オーナー全件表示では絶対に待たせない。キャッシュが無い店舗は
                                               // 空扱いで返し、裏で更新をキックするだけにする(でないと複数店舗分の
                                               // 同期スクレイピングでリクエストが長時間化し、503タイムアウトになる)
-                                              refreshStoreReviews(store, storeId).catch((err) => {
-                                                                    console.error(`初回バックグラウンド更新エラー(store=${storeId}): ` + err.message);
-                                              });
+                                                      queueBackgroundRefresh(store, storeId);
                                               reviews = [];
                           } else {
                                       reviews = cached.reviews;
                                       if (cached.isStale) {
-                                                    refreshStoreReviews(store, storeId).catch((err) => {
-                                                                    console.error(`バックグラウンド更新エラー(store=${storeId}): ` + err.message);
-                                                    });
+                                                              queueBackgroundRefresh(store, storeId);
                                       }
                           }
 
@@ -209,9 +224,7 @@ router.get('/:storeId', async (req, res) => {
 
     // 古い場合はレスポンスを返した後、裏でこっそり更新しておく(次回アクセス時のため)
     if (cached.isStale) {
-      refreshStoreReviews(store, storeId).catch((err) => {
-        console.error(`バックグラウンド更新エラー(store=${storeId}): ` + err.message);
-      });
+          queueBackgroundRefresh(store, storeId);
     }
   } catch (err) {
     console.error('口コミ一覧取得エラー: ' + err.message);
