@@ -41,7 +41,32 @@
     padding: 3px 12px;
     border-radius: 999px;
   }
-  .status-line {
+    .store-tabs {
+         display: flex;
+         gap: 6px;
+         overflow-x: auto;
+         padding: 4px 16px 10px;
+         -webkit-overflow-scrolling: touch;
+    }
+   .store-tabs::-webkit-scrollbar { display: none; }
+   .store-tab {
+        flex: 0 0 auto;
+        font-family: inherit;
+        font-size: 12px;
+        padding: 6px 12px;
+        border-radius: 999px;
+        border: 1px solid #E8E1DD;
+        background: #fff;
+        color: #6E6A63;
+        white-space: nowrap;
+   }
+   .store-tab.active {
+        background: #A8536A;
+        border-color: #A8536A;
+        color: #fff;
+        font-weight: 500;
+   }
+ .status-line {
     text-align: center;
     font-size: 12px;
     color: #8A8578;
@@ -186,7 +211,8 @@
   <div class="sub" id="storeName"></div>
   <div class="badge" id="pendingBadge" style="display:none;"></div>
 </div>
-
+ <div id="storeTabs" class="store-tabs" style="display:none;"></div>
+ 
 <div id="statusLine" class="status-line">読み込み中...</div>
 <div id="cardList"></div>
 <div id="toast"></div>
@@ -203,6 +229,7 @@ let staffName = null;
 let storeId = null;
    let role = null;
    let isOwnerView = false;
+ let selectedStoreTab = 'all';
 let reviews = [];
 
 const scoreKeyMap = {
@@ -287,25 +314,70 @@ async function loadReviews() {
 }
 
 function render() {
-  const list = document.getElementById('cardList');
-  const badge = document.getElementById('pendingBadge');
-  const pending = reviews.filter((r) => !r.done).length;
+     renderStoreTabs();
+     const list = document.getElementById('cardList');
+     const badge = document.getElementById('pendingBadge');
+     const pending = reviews.filter((r) => !r.done).length;
 
-  if (pending > 0) {
-    badge.style.display = 'inline-block';
-    badge.textContent = '未返信 ' + pending + '件';
-  } else {
-    badge.style.display = 'none';
-  }
+     if (pending > 0) {
+            badge.style.display = 'inline-block';
+            badge.textContent = '未返信 ' + pending + '件';
+     } else {
+            badge.style.display = 'none';
+     }
 
-  if (reviews.length === 0) {
-    list.innerHTML = '<div class="empty-state">未返信の口コミはありません。おつかれさまです！</div>';
-    return;
-  }
+     const visibleReviews = (isOwnerView && selectedStoreTab !== 'all')
+       ? reviews.filter((r) => r.storeId === selectedStoreTab)
+            : reviews;
 
-  list.innerHTML = reviews.map(renderCard).join('');
-  bindEvents();
+     if (visibleReviews.length === 0) {
+            list.innerHTML = '<div class="empty-state">未返信の口コミはありません。おつかれさまです！</div>';
+            return;
+     }
+
+     list.innerHTML = visibleReviews.map(renderCard).join('');
+     bindEvents();
 }
+
+   function renderStoreTabs() {
+        const tabsEl = document.getElementById('storeTabs');
+        if (!isOwnerView) {
+               tabsEl.style.display = 'none';
+               return;
+        }
+
+        const storeMap = {};
+        reviews.forEach((r) => {
+               const key = r.storeId || 'unknown';
+               if (!storeMap[key]) storeMap[key] = { name: r.storeName || key, count: 0 };
+               if (!r.done) storeMap[key].count++;
+        });
+
+        const storeIds = Object.keys(storeMap);
+        if (storeIds.length === 0) {
+               tabsEl.style.display = 'none';
+               return;
+        }
+
+        tabsEl.style.display = 'flex';
+        const allCount = reviews.filter((r) => !r.done).length;
+        const tabs = [{ id: 'all', name: '全店舗', count: allCount }].concat(
+               storeIds.map((id) => ({ id, name: storeMap[id].name, count: storeMap[id].count }))
+             );
+
+        tabsEl.innerHTML = tabs.map((t) =>
+               '<button class="store-tab ' + (selectedStoreTab === t.id ? 'active' : '') + '" data-store-tab="' + t.id + '">' +
+               escapeHtml(t.name) + (t.count > 0 ? ' (' + t.count + ')' : '') +
+               '</button>'
+             ).join('');
+
+        tabsEl.querySelectorAll('.store-tab').forEach((btn) => {
+               btn.addEventListener('click', () => {
+                        selectedStoreTab = btn.dataset.storeTab;
+                        render();
+               });
+        });
+   }
 
 function renderScores(scores) {
   const entries = Object.entries(scoreKeyMap);
