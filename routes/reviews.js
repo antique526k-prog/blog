@@ -153,7 +153,13 @@ router.get('/me', async (req, res) => {
 
                           let reviews;
                           if (cached === null) {
-                                      reviews = await refreshStoreReviews(store, storeId);
+                                              // オーナー全件表示では絶対に待たせない。キャッシュが無い店舗は
+                                              // 空扱いで返し、裏で更新をキックするだけにする(でないと複数店舗分の
+                                              // 同期スクレイピングでリクエストが長時間化し、503タイムアウトになる)
+                                              refreshStoreReviews(store, storeId).catch((err) => {
+                                                                    console.error(`初回バックグラウンド更新エラー(store=${storeId}): ` + err.message);
+                                              });
+                                              reviews = [];
                           } else {
                                       reviews = cached.reviews;
                                       if (cached.isStale) {
