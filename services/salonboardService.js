@@ -785,15 +785,19 @@ async function postReviewReply(page, reviewId, { replyContent, replyFrom = '' })
     throw new Error(`確認画面への遷移に失敗しました。現在のURL: ${page.url()}`);
   }
 
-  // 確認画面に入力内容がそのまま表示されているか最終チェック(ページ全体を対象に、
-  // 特定のセレクタに依存しない形で確認。画面構造が変わっても壊れにくくするため)
-  const pageHasContent = await page.evaluate(
-    (text) => document.body.textContent.includes(text),
-    replyContent.trim()
-  );
-  if (!pageHasContent) {
-    throw new Error('確認画面の内容が入力内容と一致しません。手動で確認してください。');
-  }
+  // 確認画面に入力内容がそのまま表示されているか最終チェック。
+      // 【注意】確認画面では入力時の改行が<br>タグとして描画されるため、
+      // textContentで取得すると改行文字が失われ、単純な文字列比較では一致しない。
+      // そのため、改行・空白をすべて取り除いた状態で比較する。
+      const normalize = (s) => (s || '').replace(/\s+/g, '');
+      const expected = normalize(replyContent);
+      const pageHasContent = await page.evaluate(
+              (text) => document.body.textContent.replace(/\s+/g, '').includes(text),
+              expected
+            );
+      if (!pageHasContent) {
+              throw new Error('確認画面の内容が入力内容と一致しません。手動で確認してください。');
+      }
 
       // 「投稿する」(本番公開)。確認画面と同じく複数の方法を順に試す。
       // こちらは押した結果、確認画面URLから離脱したかどうかで成否を判定する。
