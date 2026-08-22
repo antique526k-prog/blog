@@ -75,6 +75,8 @@
     white-space: nowrap;
   }
   .status-chip.done { background: #E7F0E9; color: #4C7A5E; }
+     .meta-badges { display: flex; gap: 6px; margin-top: 4px; }
+     .meta-badge { font-size: 10px; font-weight: 500; padding: 2px 8px; border-radius: 999px; background: #ECE7E0; color: #6E6A63; }
   .scores {
     display: grid;
     grid-template-columns: repeat(5, 1fr);
@@ -199,6 +201,8 @@ const LIFF_ID = '2010556064-L4SAkv9q';
 let currentLineUserId = null;
 let staffName = null;
 let storeId = null;
+   let role = null;
+   let isOwnerView = false;
 let reviews = [];
 
 const scoreKeyMap = {
@@ -242,10 +246,12 @@ async function init() {
       statusEl.textContent = meData.error || '担当者情報が見つかりません';
       return;
     }
-    staffName = meData.staffName;
-    storeId = meData.storeId;
-    document.getElementById('staffName').textContent = staffName + 'さん';
-    document.getElementById('storeName').textContent = storeId;
+          staffName = meData.staffName;
+         storeId = meData.storeId;
+         role = meData.role;
+         isOwnerView = role === 'owner';
+         document.getElementById('staffName').textContent = staffName + 'さん';
+         document.getElementById('storeName').textContent = isOwnerView ? '全店舗(オーナー)' : storeId;
   } catch (e) {
     console.error('担当者情報取得エラー', e);
     statusEl.textContent = '担当者情報の取得に失敗しました';
@@ -260,10 +266,12 @@ async function loadReviews() {
   statusEl.textContent = '口コミを確認しています...(初回は少し時間がかかります)';
   document.getElementById('cardList').innerHTML = '';
 
-  try {
-    const res = await fetch(
-      '/api/reviews/' + encodeURIComponent(storeId) + '?staff=' + encodeURIComponent(staffName)
-    );
+      try {
+       const res = await fetch(
+               isOwnerView
+                 ? '/api/reviews/all?lineUserId=' + encodeURIComponent(currentLineUserId)
+                 : '/api/reviews/' + encodeURIComponent(storeId) + '?staff=' + encodeURIComponent(staffName)
+             );
     const data = await res.json();
     if (!data.success) {
       statusEl.textContent = data.error || '口コミの取得に失敗しました';
@@ -321,30 +329,38 @@ function renderScores(scores) {
 }
 
 function renderCard(r) {
-  const hasNickname = r.nickname && r.nickname.trim();
-  const custLabel = hasNickname ? escapeHtml(r.nickname) + ' 様' : 'ニックネーム未設定のお客様';
-  const draftText = escapeHtml(r.aiDraft || '');
-  return (
-    '<div class="card ' + (r.done ? 'done' : '') + '" data-id="' + r.reviewId + '">' +
-    '<div class="card-head">' +
-    '<div><div class="cust-name">' + custLabel + '</div>' +
-    '<div class="visit-date">' + escapeHtml(r.visitDate || '') + '</div></div>' +
-    '<div class="status-chip ' + (r.done ? 'done' : '') + '">' + (r.done ? '投稿済み' : '未返信') + '</div>' +
-    '</div>' +
-    renderScores(r.scores) +
-    '<div class="review-body">' + escapeHtml(r.body || '(本文なし)') + '</div>' +
-    '<div class="draft-label"><span>返信内容</span><span class="ai-tag">AI下書き</span></div>' +
-    '<textarea class="draft-input" data-id="' + r.reviewId + '" maxlength="600" ' +
-    (r.done ? 'disabled' : '') + '>' + draftText + '</textarea>' +
-    '<div class="char-count" data-id="' + r.reviewId + '">' + draftText.length + ' / 500</div>' +
-    '<div class="card-actions">' +
-    '<button class="btn-ghost" data-action="regenerate" data-id="' + r.reviewId + '" ' +
-    (r.done ? 'disabled' : '') + '>作り直す</button>' +
-    '<button class="btn-primary" data-action="post" data-id="' + r.reviewId + '" ' +
-    (r.done ? 'disabled' : '') + '>' + (r.done ? '投稿済み' : '投稿する') + '</button>' +
-    '</div>' +
-    '</div>'
-  );
+     const hasNickname = r.nickname && r.nickname.trim();
+     const custLabel = hasNickname ? escapeHtml(r.nickname) + ' 様' : 'ニックネーム未設定のお客様';
+     const draftText = escapeHtml(r.aiDraft || '');
+     const metaBadges = isOwnerView
+       ? '<div class="meta-badges">' +
+              '<span class="meta-badge">' + escapeHtml(r.storeName || r.storeId || '') + '</span>' +
+              '<span class="meta-badge">' + escapeHtml(r.staff || '担当不明') + '</span>' +
+              '</div>'
+            : '';
+     return (
+            '<div class="card ' + (r.done ? 'done' : '') + '" data-id="' + r.reviewId + '" data-store="' + (r.storeId || storeId) + '">' +
+            '<div class="card-head">' +
+            '<div><div class="cust-name">' + custLabel + '</div>' +
+            '<div class="visit-date">' + escapeHtml(r.visitDate || '') + '</div>' +
+            metaBadges +
+            '</div>' +
+            '<div class="status-chip ' + (r.done ? 'done' : '') + '">' + (r.done ? '投稿済み' : '未返信') + '</div>' +
+            '</div>' +
+            renderScores(r.scores) +
+            '<div class="review-body">' + escapeHtml(r.body || '(本文なし)') + '</div>' +
+            '<div class="draft-label"><span>返信内容</span><span class="ai-tag">AI下書き</span></div>' +
+            '<textarea class="draft-input" data-id="' + r.reviewId + '" maxlength="600" ' +
+            (r.done ? 'disabled' : '') + '>' + draftText + '</textarea>' +
+            '<div class="char-count" data-id="' + r.reviewId + '">' + draftText.length + ' / 500</div>' +
+            '<div class="card-actions">' +
+            '<button class="btn-ghost" data-action="regenerate" data-id="' + r.reviewId + '" ' +
+            (r.done ? 'disabled' : '') + '>作り直す</button>' +
+            '<button class="btn-primary" data-action="post" data-id="' + r.reviewId + '" ' +
+            (r.done ? 'disabled' : '') + '>' + (r.done ? '投稿済み' : '投稿する') + '</button>' +
+            '</div>' +
+            '</div>'
+          );
 }
 
 function escapeHtml(s) {
@@ -369,11 +385,12 @@ function bindEvents() {
   document.querySelectorAll('[data-action="regenerate"]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const id = btn.dataset.id;
+             const cardStoreId = btn.closest('.card').dataset.store;
       btn.disabled = true;
       showToast('下書きを作り直しています...');
       try {
         const res = await fetch(
-          '/api/reviews/' + encodeURIComponent(storeId) + '/' + encodeURIComponent(id) + '/regenerate-draft',
+          '/api/reviews/' + encodeURIComponent(cardStoreId) + '/' + encodeURIComponent(id) + '/regenerate-draft',
           { method: 'POST' }
         );
         const data = await res.json();
@@ -397,6 +414,7 @@ function bindEvents() {
   document.querySelectorAll('[data-action="post"]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const id = btn.dataset.id;
+             const cardStoreId = btn.closest('.card').dataset.store;
       const rev = reviews.find((r) => r.reviewId === id);
       if (!rev) return;
 
@@ -415,12 +433,12 @@ function bindEvents() {
       btn.disabled = true;
       try {
         const res = await fetch(
-          '/api/reviews/' + encodeURIComponent(storeId) + '/' + encodeURIComponent(id) + '/post',
+          '/api/reviews/' + encodeURIComponent(cardStoreId) + '/' + encodeURIComponent(id) + '/post',
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              staff: staffName,
+              staff: rev.staff || staffName,
               nickname: rev.nickname,
               replyContent,
             }),
