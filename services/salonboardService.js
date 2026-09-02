@@ -574,16 +574,30 @@ async function loginHQAndGetPage(hqSalonboardConfig) {
 // ===== サロン一覧から指定店舗に切り替える =====
 async function switchToStore(page, salonId) {
       await page.goto(GROUP_TOP_URL, { waitUntil: 'networkidle2' });
-      const [clicked] = await Promise.all([
-              page.evaluate((id) => {
-                        const el = document.getElementById(id);
-                        if (el) {
-                                    el.click();
-                                    return true;
-                        }
-                        return false;
-              }, salonId),
-            ]);
+      let clicked = false;
+      try {
+              const [result] = await Promise.all([
+                        page.evaluate((id) => {
+                                    const el = document.getElementById(id);
+                                    if (el) {
+                                                  el.click();
+                                                  return true;
+                                    }
+                                    return false;
+                        }, salonId),
+                      ]);
+              clicked = result;
+      } catch (e) {
+              // クリックした瞬間にページ遷移が始まり、evaluate()の返り値を
+              // 受け取る前にフレームが破棄されることがある(Attempted to use
+              // detached Frame)。これはクリック自体が成功して遷移が始まった
+              // ことを意味するので、失敗として扱わずclicked=trueとみなす。
+              if (/detached Frame/i.test(e.message || '')) {
+                        clicked = true;
+              } else {
+                        throw e;
+              }
+      }
           if (!clicked) {
                   // 【診断強化】店舗リンクが見つからん場合、実際どんなページに
                   // 着地しとるかが分からんと原因を絞り込めん(手動ログインは
