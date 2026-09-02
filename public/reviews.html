@@ -41,6 +41,22 @@
     padding: 3px 12px;
     border-radius: 999px;
   }
+   .refresh-btn {
+        display: none;
+        margin-top: 8px;
+        margin-left: 6px;
+        font-family: inherit;
+        font-size: 12px;
+        padding: 4px 12px;
+        border-radius: 999px;
+        border: 1px solid #A8536A;
+        background: #fff;
+        color: #A8536A;
+   }
+   .refresh-btn:disabled {
+        opacity: 0.5;
+   }
+ 
     .store-tabs {
          display: flex;
          gap: 6px;
@@ -210,6 +226,7 @@
   <h1 id="staffName">読み込み中...</h1>
   <div class="sub" id="storeName"></div>
   <div class="badge" id="pendingBadge" style="display:none;"></div>
+ <button id="ownerRefreshBtn" class="refresh-btn">今すぐ更新をリクエスト</button>
 </div>
  <div id="storeTabs" class="store-tabs" style="display:none;"></div>
  
@@ -285,7 +302,36 @@ async function init() {
     return;
   }
 
-  await loadReviews();
+  const refreshBtn = document.getElementById('ownerRefreshBtn');
+     if (isOwnerView) {
+            refreshBtn.style.display = 'inline-block';
+            refreshBtn.addEventListener('click', async () => {
+                     refreshBtn.disabled = true;
+                     refreshBtn.textContent = 'リクエスト中...';
+                     try {
+                                const res = await fetch(
+                                             '/api/reviews/all/refresh?lineUserId=' + encodeURIComponent(currentLineUserId),
+                                 { method: 'POST' }
+                                           );
+                                const data = await res.json();
+                                if (data.success) {
+                                             showToast('更新をリクエストしました(反映まで数分かかります)');
+                                } else {
+                                             showToast(data.error || '更新リクエストに失敗しました');
+                                }
+                     } catch (e) {
+                                console.error(e);
+                                showToast('更新リクエストに失敗しました');
+                     } finally {
+                                setTimeout(() => {
+                                             refreshBtn.disabled = false;
+                                             refreshBtn.textContent = '今すぐ更新をリクエスト';
+                                }, 5000);
+                     }
+            });
+     }
+ 
+     await loadReviews();
 }
 
 async function loadReviews() {
