@@ -60,13 +60,33 @@ function groupSalonId(store) {
 // 全滅した実績あり)。そのため、バックグラウンド更新は必ずこのキューを
 // 経由し、1件ずつ順番に処理する。
 let backgroundQueue = Promise.resolve();
+
+// 【重要】SalonBoard本部アカウントへのログインを伴う処理(refreshStoreReviews、
+// postReviewReplyなど)は、必ずこの関数を経由させること。直接呼び出しては
+// いけない。理由: 複数の処理が同時に本部アカウントへログインしようとすると、
+// SalonBoard側でセッションが競合し、「認証エラーです。ログインしなおして
+// ください」という本物のエラーページに着地してしまうことが実際に確認された。
+function runSalonboardTask(task) {
+    const result = backgroundQueue.then(task, task);
+    // 前のタスクが失敗してもチェーンは止めず、次のタスクへ進める
+    backgroundQueue = result.then(
+          () => {},
+          () => {}
+        );
+    return result;
+}
+
 function queueBackgroundRefresh(store, storeId) {
-      backgroundQueue = backgroundQueue
-      .then(() => refreshStoreReviews(store, storeId))
+    runSalonboardTask(() => refreshStoreReviews(store, storeId))
       .catch((err) => {
               console.error(`バックグラウンド更新エラー(store=${storeId}): ` + err.message);
-      })
-      .then(() => new Promise((r) => setTimeout(r, 5000))); // 次の店舗との間にCPUを落ち着かせる猶予を置く
+      });
+}
+
+// 同期的に結果が欲しい呼び出し元(LIFF初回表示など)用。
+// 結果・エラーともにそのまま呼び出し元へ伝播する。
+function queuedRefreshStoreReviews(store, storeId) {
+    return runSalonboardTask(() => refreshStoreReviews(store, storeId));
 }
 
 
@@ -243,7 +263,7 @@ router.get('/:storeId', async (req, res) => {
     const cached = await getCachedUnrepliedReviewsAnyAge(storeId);
 
     if (cached === null) {
-      const refreshed = await refreshStoreReviews(store, storeId);
+      const refreshed = await queuedRefreshStoreReviews(store, storeId);
       const forStaff = refreshed.filter((r) => r.staff === staff);
       return res.json({ success: true, reviews: forStaff, source: 'live-initial' });
     }
@@ -312,15 +332,17 @@ router.post('/:storeId/:reviewId/post', async (req, res) => {
   (async () => {
     let result = 'error';
     try {
-      const store = getStoreConfig(storeId);
-      const { browser, page } = await loginHQAndGetPage(HQ_SALONBOARD_CONFIG);
-      try {
-        await switchToStore(page, groupSalonId(store));
-        await postReviewReply(page, reviewId, { replyContent, replyFrom });
-        result = 'success';
-      } finally {
-        await browser.close();
-      }
+              const store = getStoreConfig(storeId);
+              await runSalonboardTask(async () => {
+                          const { browser, page } = await loginHQAndGetPage(HQ_SALONBOARD_CONFIG);
+                          try {
+                                        await switchToStore(page, groupSalonId(store));
+                                        await postReviewReply(page, reviewId, { replyContent, replyFrom });
+                                        result = 'success';
+                          } finally {
+                                        await browser.close();
+                          }
+              });
       await removeReviewFromCache(storeId, reviewId);
       console.log(`口コミ投稿完了: store=${storeId}, reviewId=${reviewId}, staff=${staff}`);
     } catch (err) {
