@@ -584,11 +584,22 @@ async function switchToStore(page, salonId) {
                         return false;
               }, salonId),
             ]);
-      if (!clicked) {
-              throw new Error(
-                        `店舗ID "${salonId}" のリンクがサロン一覧(${GROUP_TOP_URL})に見つかりませんでした。config/stores.jsのhotpepperSalonIdを確認してください。`
-                      );
-      }
+          if (!clicked) {
+                  // 【診断強化】店舗リンクが見つからん場合、実際どんなページに
+                  // 着地しとるかが分からんと原因を絞り込めん(手動ログインは
+                  // 正常なのに自動化だけ失敗する現象が起きているため)。
+                  // ページのtitleと本文の頭200文字をエラーに含めて、
+                  // ログイン画面/警告画面/空白ページ等のどれなのか判別できるようにする。
+                  const diag = await page.evaluate(() => ({
+                            title: document.title,
+                            bodySnippet: (document.body.innerText || '').slice(0, 200),
+                  })).catch(() => ({ title: '(取得失敗)', bodySnippet: '(取得失敗)' }));
+                  throw new Error(
+                            `店舗ID "${salonId}" のリンクがサロン一覧(${GROUP_TOP_URL})に見つかりませんでした。` +
+                            `現在のURL: ${page.url()} / ページタイトル: ${diag.title} / ` +
+                            `本文冒頭: ${diag.bodySnippet.replace(/\s+/g, ' ')}`
+                          );
+          }
       await waitForPageStable(page);
       // 店舗切り替え後、口コミ一覧など次のページ操作の前に少し待つ
       // (headless環境ではnetworkidle2判定後もDOM描画が追いついていないことがあるため)
