@@ -194,6 +194,39 @@ router.get('/me', async (req, res) => {
         }
   });
 
+/**
+ * POST /api/reviews/all/refresh?lineUserId=xxx
+  * オーナー専用の手動更新ボタン。8店舗全部のキャッシュ鮮度を無視して、
+   * バックグラウンドキューに更新をまとめて積む。
+    * 【重要】ここでも同期的に8店舗分取得することは絶対にしない
+     * (以前それで503タイムアウトになった経緯があるため)。
+      * あくまで「更新をリクエストするだけ」で、実際の反映は数分後になる。
+       */
+router.post('/all/refresh', async (req, res) => {
+    try {
+          const { lineUserId } = req.query;
+          if (!lineUserId) {
+                  return res.status(400).json({ success: false, error: 'lineUserId クエリパラメータが必要です' });
+          }
+
+          const profile = await getStaffProfileByLineUserId(lineUserId);
+          if (!profile || profile.role !== 'owner') {
+                  return res.status(403).json({ success: false, error: 'この操作を行う権限がありません' });
+          }
+
+          const allStores = listStores();
+          allStores.forEach(({ id: storeId }) => {
+                  const store = getStoreConfig(storeId);
+                  queueBackgroundRefresh(store, storeId);
+          });
+
+          res.json({ success: true, message: '更新をリクエストしました' });
+    } catch (err) {
+          console.error('手動更新リクエストエラー: ' + err.message);
+          res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 router.get('/:storeId', async (req, res) => {
   try {
     const { storeId } = req.params;
