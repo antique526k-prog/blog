@@ -61,11 +61,12 @@ function groupSalonId(store) {
 // 経由し、1件ずつ順番に処理する。
 let backgroundQueue = Promise.resolve();
 function queueBackgroundRefresh(store, storeId) {
-    backgroundQueue = backgroundQueue
+      backgroundQueue = backgroundQueue
       .then(() => refreshStoreReviews(store, storeId))
       .catch((err) => {
               console.error(`バックグラウンド更新エラー(store=${storeId}): ` + err.message);
-      });
+      })
+      .then(() => new Promise((r) => setTimeout(r, 5000))); // 次の店舗との間にCPUを落ち着かせる猶予を置く
 }
 
 
