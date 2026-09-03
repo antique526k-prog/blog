@@ -275,17 +275,28 @@ async function loginToSalonBoard(page, salonboardConfig) {
     // SalonBoard側のページに一切辿り着けなかった場合、URLもbodyTextの文言も
     // 判定に使えないため見逃していた。Chromeの標準エラーページには
     // 必ず #main-frame-error という要素があるので、これで検知する。
-    const isNetworkErrorPage = await page
-    .evaluate(() => !!document.querySelector('#main-frame-error'))
-    .catch(() => false);
+// 【追加】エラーコード(ERR_TIMED_OUT / ERR_CONNECTION_REFUSED等)も一緒に取得する。
+    // 毎回同じコードなのか日によって違うのかで、単純な負荷なのか意図的な
+    // 遮断なのかの切り分け材料になる。
+    const networkErrorCode = await page
+    .evaluate(() => {
+      const mainFrameError = document.querySelector('#main-frame-error');
+      if (!mainFrameError) return null;
+      const codeEl = document.querySelector('#error-code');
+      return codeEl ? codeEl.textContent.trim() : '(コード不明)';
+    })
+    .catch(() => null);
 
-    if (isNetworkErrorPage) {
+    if (networkErrorCode) {
+      console.log(`[ネットワークエラー詳細] ${networkErrorCode}`);
       const err = new Error(
-        `SalonBoardログイン時にネットワークエラーが発生し、ページを読み込めませんでした。` +
+        `SalonBoardログイン時にネットワークエラーが発生し、ページを読み込めませんでした` +
+        `(エラーコード: ${networkErrorCode})。` +
         `SalonBoard側が一時的に応答していないか、アクセス制限をかけている可能性があります。` +
         (afterLoginClickScreenshotUrl ? ` スクリーンショット: ${afterLoginClickScreenshotUrl}` : '')
         );
       err.isNetworkError = true; // 呼び出し側で認証エラーと区別できるようにフラグを立てる
+      err.networkErrorCode = networkErrorCode; // ERR_TIMED_OUT等、具体的なコード
       err.screenshotUrl = afterLoginClickScreenshotUrl || null;
       throw err; // このケースも他のパスワードを試しても無意味なので即座に投げる
     }
