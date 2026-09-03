@@ -33,6 +33,7 @@ const {
   fetchUnrepliedReviewSummaries,
   fetchReviewDetail,
   postReviewReply,
+  runSalonboardTask,
 } = require('../services/salonboardService');
 const { generateReviewReplyDraft } = require('../services/geminiService');
 
@@ -50,37 +51,19 @@ function groupSalonId(store) {
   return (store.hotpepperSalonId || '').replace(/^sln/, '');
 }
 
-// ===== バックグラウンド更新の直列化キュー =====
-// 【なぜ必要か】
-// オーナーの全件表示は複数店舗のキャッシュが同時に古くなりがちで、
-// 各店舗の更新がそれぞれ「本部アカウントで新しいPuppeteerブラウザを起動して
-// ログインし直す」処理を伴う。これを何も考えずに並列実行すると、
-// Renderの小さいインスタンス上で同時に何個ものヘッドレスChromeが立ち上がり、
-// リソース不足でページが正しく読み込めなくなる(実際に8店舗同時更新で
-// 全滅した実績あり)。そのため、バックグラウンド更新は必ずこのキューを
-// 経由し、1件ずつ順番に処理する。
-let backgroundQueue = Promise.resolve();
-
-// 【重要】SalonBoard本部アカウントへのログインを伴う処理(refreshStoreReviews、
-// postReviewReplyなど)は、必ずこの関数を経由させること。直接呼び出しては
-// いけない。理由: 複数の処理が同時に本部アカウントへログインしようとすると、
-// SalonBoard側でセッションが競合し、「認証エラーです。ログインしなおして
-// ください」という本物のエラーページに着地してしまうことが実際に確認された。
-function runSalonboardTask(task) {
-    const result = backgroundQueue.then(task, task);
-    // 前のタスクが失敗してもチェーンは止めず、次のタスクへ進める
-    backgroundQueue = result.then(
-          () => {},
-          () => {}
-        );
-    return result;
-}
+// 【重要】SalonBoardへのログインを伴う処理(refreshStoreReviews、postReviewReply
+// など)は、必ず salonboardService.js の runSalonboardTask を経由させること。
+// 直接呼び出してはいけない。以前はこのファイル内だけのローカルキューだったが、
+// 投稿者一覧取得(routes/stylists.js)やブログ投稿(publishService.js)は
+// キューを経由せず独自にPuppeteerを起動していたため、複数のPuppeteerが
+// 同時に立ち上がってリソース不足になる事例が確認された(2026/09/03)。
+// そのため、キューを salonboardService.js 側に移してアプリ全体で共有している。
 
 function queueBackgroundRefresh(store, storeId) {
-    runSalonboardTask(() => refreshStoreReviews(store, storeId))
-      .catch((err) => {
-              console.error(`バックグラウンド更新エラー(store=${storeId}): ` + err.message);
-      });
+  runSalonboardTask(() => refreshStoreReviews(store, storeId))
+  .catch((err) => {
+    console.error(`バックグラウンド更新エラー(store=${storeId}): ` + err.message);
+  });
 }
 
 // 同期的に結果が欲しい呼び出し元(LIFF初回表示など)用。
