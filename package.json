@@ -2,9 +2,9 @@
   "name": "salonboard-automation",
   "version": "1.0.0",
   "description": "SalonBoard自動ログイン・投稿システム(自社利用限定)",
-  "main": "salonboard-login.js",
+    "main": "server.js",
   "scripts": {
-    "start": "node salonboard-login.js",
+        "start": "node server.js",
     "postinstall": "node install-fonts.js"
   },
 "dependencies": {
