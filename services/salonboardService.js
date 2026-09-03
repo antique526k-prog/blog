@@ -209,24 +209,37 @@ function downloadFile(url, destPath, redirectCount = 0) {
 
 // ===== ブラウザを起動する共通処理 =====
 async function launchBrowser() {
+  // 【診断用】V8のヒープサイズ制限がページの重さ・タイムアウトに影響している
+  // 可能性を切り分けるため、環境変数で外せるようにしている。
+  // Renderの環境変数 SALONBOARD_DISABLE_MEMORY_LIMIT を 'true' にすると外れる。
+  // 通常運用時は未設定のままでOK(制限は有効のまま)。
+  const memoryLimitDisabled = process.env.SALONBOARD_DISABLE_MEMORY_LIMIT === 'true';
+  if (memoryLimitDisabled) {
+    console.log('[診断モード] V8ヒープサイズ制限を無効化した状態で起動しています');
+  }
+
+  const args = [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-gpu',
+    '--disable-background-networking',
+    '--disable-background-timer-throttling',
+    '--disable-backgrounding-occluded-windows',
+    '--disable-renderer-backgrounding',
+    '--disable-extensions',
+    '--disable-component-extensions-with-background-pages',
+    '--disable-default-apps',
+    '--no-first-run',
+    '--mute-audio',
+    ];
+  if (!memoryLimitDisabled) {
+    args.push('--js-flags=--max-old-space-size=256'); // V8のヒープサイズを制限してメモリ使用量を抑える
+  }
+
   return puppeteer.launch({
     headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--disable-background-networking',
-      '--disable-background-timer-throttling',
-      '--disable-backgrounding-occluded-windows',
-      '--disable-renderer-backgrounding',
-      '--disable-extensions',
-      '--disable-component-extensions-with-background-pages',
-      '--disable-default-apps',
-      '--no-first-run',
-      '--mute-audio',
-      '--js-flags=--max-old-space-size=256', // V8のヒープサイズを制限してメモリ使用量を抑える
-    ],
+    args,
   });
 }
 
