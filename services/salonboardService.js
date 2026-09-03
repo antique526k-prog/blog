@@ -55,6 +55,22 @@ try {
   // ディレクトリが既にある場合等は無視
 }
 
+// ===== ページがChromeのネットワークエラー画面になっていないか確認する共通関数 =====
+// 【なぜ必要か】ログインページ自体の読み込み(page.goto直後)と、
+// ログインボタン押下後の2箇所で同じチェックが必要なため、共通化した。
+// @param {import('puppeteer').Page} page
+// @returns {Promise<string|null>} エラーコード(例: 'ERR_TIMED_OUT')。エラーでなければnull
+async function detectNetworkErrorCode(page) {
+  return page
+  .evaluate(() => {
+    const mainFrameError = document.querySelector('#main-frame-error');
+    if (!mainFrameError) return null;
+    const bodyText = document.body ? document.body.innerText : '';
+    const m = bodyText.match(/ERR_[A-Z_]+/);
+    return m ? m[0] : '(コード不明)';
+  })
+  .catch(() => null);
+}
 // ===== 任意のタイミングでページのスクリーンショットを撮って保存する共通関数 =====
 // @param {import('puppeteer').Page} page
 // @param {string} label ファイル名の先頭に付ける識別子(例: 'after_login_click')
@@ -270,6 +286,25 @@ async function loginToSalonBoard(page, salonboardConfig) {
 
   for (const password of passwords) {
     await page.goto(LOGIN_URL, { waitUntil: 'networkidle2' });
+
+    // 【重要】ログインフォームが表示される前の、トップページ相当の読み込み自体が
+    // 失敗しているケースもここで検知する。以前はログインボタン押下後しか
+    // チェックしておらず、ここで失敗すると次のwaitForSelectorが汎用的なタイムアウトエラーで落ちるだけで原因が分かりにくかった。
+    const loginPageErrorCode = await detectNetworkErrorCode(page);
+    if (loginPageErrorCode) {
+      const screenshotUrl = await saveDebugScreenshot(page, 'login_page_load_failed');
+      console.log(`[ネットワークエラー詳細] ${loginPageErrorCode}`);
+      const err = new Error(
+        `SalonBoardログインページ自体の読み込みに失敗しました` +
+        `(エラーコード: ${loginPageErrorCode})。` +
+        `SalonBoard側が一時的に応答していないか、アクセス制限をかけている可能性があります。` +
+        (screenshotUrl ? ` スクリーンショット: ${screenshotUrl}` : '')
+        );
+      err.isNetworkError = true;
+      err.networkErrorCode = loginPageErrorCode;
+      err.screenshotUrl = screenshotUrl || null;
+      throw err;
+    }
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
     await page.waitForSelector('input[name="userId"]');
@@ -310,17 +345,7 @@ async function loginToSalonBoard(page, salonboardConfig) {
 // 【追加】エラーコード(ERR_TIMED_OUT / ERR_CONNECTION_REFUSED等)も一緒に取得する。
     // 毎回同じコードなのか日によって違うのかで、単純な負荷なのか意図的な
     // 遮断なのかの切り分け材料になる。
-    const networkErrorCode = await page
-    .evaluate(() => {
-      const mainFrameError = document.querySelector('#main-frame-error');
-      if (!mainFrameError) return null;
-      // 【重要】#error-code等のセレクタはChromeのバージョンで構造が変わることがあるため、
-      // 確実な方法として本文テキストから ERR_XXX パターンを直接探す。
-      const bodyText = document.body ? document.body.innerText : '';
-      const m = bodyText.match(/ERR_[A-Z_]+/);
-      return m ? m[0] : '(コード不明)';
-    })
-    .catch(() => null);
+    const networkErrorCode = await detectNetworkErrorCode(page);
 
     if (networkErrorCode) {
       console.log(`[ネットワークエラー詳細] ${networkErrorCode}`);
