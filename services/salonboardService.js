@@ -34,6 +34,40 @@ const https = require('https');
 
 const LOGIN_URL = 'https://salonboard.com/login_sp/';
 
+// ===== デバッグ用スクリーンショットの保存先 =====
+// salonboard-login.js の頃から使っていた仕組みを踏襲。
+// server.js 側で /screenshots に静的公開している。
+// 【注意】Renderの再デプロイでファイルシステムがリセットされるため、
+// 恒久保存ではなく「直近の失敗を目視確認する」用途に限る。
+const SCREENSHOT_DIR = path.join(__dirname, '..', 'screenshots');
+try {
+  fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
+} catch (e) {
+  // ディレクトリが既にある場合等は無視
+}
+
+// ===== 任意のタイミングでページのスクリーンショットを撮って保存する共通関数 =====
+// @param {import('puppeteer').Page} page
+// @param {string} label ファイル名の先頭に付ける識別子(例: 'after_login_click')
+// @returns {Promise<string|null>} 保存できた場合は公開URL(または相対パス)、失敗時はnull
+async function saveDebugScreenshot(page, label) {
+  try {
+    const safeLabel = String(label).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const fileName = `${safeLabel}_${Date.now()}.png`;
+    const filePath = path.join(SCREENSHOT_DIR, fileName);
+    await page.screenshot({ path: filePath, fullPage: true });
+
+    const base = (process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
+    const url = base ? `${base}/screenshots/${fileName}` : `/screenshots/${fileName}`;
+    console.log(`[デバッグスクリーンショット] ${label}: ${url}`);
+    return url;
+  } catch (e) {
+    // スクリーンショット自体の失敗で本処理を止めたくないので、ログだけ出して握りつぶす
+    console.error(`[デバッグスクリーンショット] ${label} の保存に失敗: ` + e.message);
+    return null;
+  }
+}
+
 // ===== ページが安定するまで待つ共通関数 =====
 async function waitForPageStable(page, maxRetries = 15, intervalMs = 1000) {
   let stableCount = 0;
@@ -234,6 +268,9 @@ async function loginToSalonBoard(page, salonboardConfig) {
     await new Promise((resolve) => setTimeout(resolve, 2000));
     await waitForPageStable(page);
 
+    // ログインボタン押下後の画面を毎回スクリーンショットに残す(目視デバッグ用)
+    const afterLoginClickScreenshotUrl = await saveDebugScreenshot(page, 'after_login_click');
+
 // ログイン後の状態を判定する
     const currentUrl = page.url();
     const isStillLoginPage = currentUrl.includes('/login_sp/');
@@ -253,11 +290,13 @@ async function loginToSalonBoard(page, salonboardConfig) {
     const isAuthErrorPage = /認証エラー|ユーザエラー|ログインしなおして/.test(bodyText);
 
     if (isAuthErrorPage) {
-      const err = new Error(
-        `SalonBoardログイン後に認証エラー画面に遷移しました(URL: ${currentUrl})。` +
-        `パスワード誤りではなく、アカウント側のブロック/セッション不整合の可能性があります。`
-        );
+const err = new Error(
+  `SalonBoardログイン後に認証エラー画面に遷移しました(URL: ${currentUrl})。` +
+  `パスワード誤りではなく、アカウント側のブロック/セッション不整合の可能性があります。` +
+  (afterLoginClickScreenshotUrl ? ` スクリーンショット: ${afterLoginClickScreenshotUrl}` : '')
+  );
       err.isAuthBlock = true; // 呼び出し側でボット検知系エラーと区別できるようにフラグを立てる
+      err.screenshotUrl = afterLoginClickScreenshotUrl || null;
       throw err; // このケースは他のパスワードを試しても無意味なので即座に投げる
     }
 
@@ -629,11 +668,13 @@ async function switchToStore(page, salonId) {
                             title: document.title,
                             bodySnippet: (document.body.innerText || '').slice(0, 200),
                   })).catch(() => ({ title: '(取得失敗)', bodySnippet: '(取得失敗)' }));
-                  throw new Error(
-                            `店舗ID "${salonId}" のリンクがサロン一覧(${GROUP_TOP_URL})に見つかりませんでした。` +
-                            `現在のURL: ${page.url()} / ページタイトル: ${diag.title} / ` +
-                            `本文冒頭: ${diag.bodySnippet.replace(/\s+/g, ' ')}`
-                          );
+                  const switchStoreScreenshotUrl = await saveDebugScreenshot(page, 'switch_store_failed');
+            throw new Error(
+              `店舗ID "${salonId}" のリンクがサロン一覧(${GROUP_TOP_URL})に見つかりませんでした。` +
+              `現在のURL: ${page.url()} / ページタイトル: ${diag.title} / ` +
+              `本文冒頭: ${diag.bodySnippet.replace(/\s+/g, ' ')}` +
+              (switchStoreScreenshotUrl ? ` / スクリーンショット: ${switchStoreScreenshotUrl}` : '')
+              );
           }
       await waitForPageStable(page);
       // 店舗切り替え後、口コミ一覧など次のページ操作の前に少し待つ
