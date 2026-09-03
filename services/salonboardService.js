@@ -291,8 +291,11 @@ async function loginToSalonBoard(page, salonboardConfig) {
     .evaluate(() => {
       const mainFrameError = document.querySelector('#main-frame-error');
       if (!mainFrameError) return null;
-      const codeEl = document.querySelector('#error-code');
-      return codeEl ? codeEl.textContent.trim() : '(コード不明)';
+      // 【重要】#error-code等のセレクタはChromeのバージョンで構造が変わることがあるため、
+      // 確実な方法として本文テキストから ERR_XXX パターンを直接探す。
+      const bodyText = document.body ? document.body.innerText : '';
+      const m = bodyText.match(/ERR_[A-Z_]+/);
+      return m ? m[0] : '(コード不明)';
     })
     .catch(() => null);
 
