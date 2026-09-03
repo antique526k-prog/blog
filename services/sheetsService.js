@@ -332,8 +332,10 @@ async function updateFooterText(storeId, newText) {
  * ============================================
  */
 
-const REVIEW_CACHE_TTL_MS = 30 * 60 * 1000; // 30分。stylist_cacheより短くしている
-// (口コミは新着が入り次第、担当者になるべく早く見えてほしいため)
+const REVIEW_CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4時間。
+// 【変更履歴】以前は30分だったが、本部アカウントへのログイン頻度が高くなりすぎて
+// SalonBoard側の認証エラー(セッション競合)を誘発しやすかったため、
+// ログイン頻度を下げる目的で4時間に延長した。
 
 const REVIEW_CACHE_HEADERS = [
   'store_id',
