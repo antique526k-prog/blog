@@ -9,7 +9,7 @@
 const fetch = require('node-fetch');
 const { getStoreConfig } = require('../config/stores');
 const { getFooterText, logPublishResult } = require('./sheetsService');
-const { postBlogToSalonBoard } = require('./salonboardService');
+const { postBlogToSalonBoard, runSalonboardTask } = require('./salonboardService');
 
 /**
  * GBP・WordPress・SalonBoardへ同時投稿する
@@ -49,13 +49,17 @@ async function publishToAllChannels(storeId, finalText, base64Image, mimeType, s
     // 絵文字(✨等)もSalonBoard側のバリデーションで「不正な文字」として弾かれるため除去する。
     const title = removeEmoji(finalText.replace(/\n/g, ' ')).trim().slice(0, 25);
     const body = removeEmoji(fullText).slice(0, 1000);
-    return postBlogToSalonBoard(store, {
-      stylistId: stylistId || store.salonboard.defaultStylistId,
-      categoryCd: store.salonboard.defaultCategoryCd,
-      title,
-      body,
-      imageUrl,
-    });
+    // 【重要】口コミ機能等と同じ直列化キューを経由させ、Puppeteerが
+    // 同時に複数起動しないようにする。
+    return runSalonboardTask(() =>
+      postBlogToSalonBoard(store, {
+        stylistId: stylistId || store.salonboard.defaultStylistId,
+        categoryCd: store.salonboard.defaultCategoryCd,
+        title,
+        body,
+        imageUrl,
+      })
+                             );
   });
 
   await logPublishResult(storeId, gbpResult, wpResult, salonboardResult);
