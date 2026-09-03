@@ -16,7 +16,7 @@ const express = require('express');
 const router = express.Router();
 const { getStoreConfig } = require('../config/stores');
 const { getCachedStylists, updateStylistCache } = require('../services/sheetsService');
-const { fetchStylistOptions } = require('../services/salonboardService');
+const { fetchStylistOptions, runSalonboardTask } = require('../services/salonboardService');
 
 router.get('/:storeId', async (req, res) => {
   try {
@@ -28,8 +28,10 @@ router.get('/:storeId', async (req, res) => {
       return res.json({ success: true, stylists: cached, source: 'cache' });
     }
 
-    // キャッシュが無い、または期限切れの場合はその場で取得
-    const { stylist } = await fetchStylistOptions(store);
+    // キャッシュが無い、または期限切れの場合はその場で取得。
+    // 【重要】口コミ機能等と同じ直列化キューを経由させ、Puppeteerが
+    // 同時に複数起動しないようにする。
+    const { stylist } = await runSalonboardTask(() => fetchStylistOptions(store));
     await updateStylistCache(storeId, stylist);
 
     res.json({ success: true, stylists: stylist, source: 'live' });
