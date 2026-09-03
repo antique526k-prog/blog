@@ -26,7 +26,16 @@
 
 const puppeteerExtra = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-puppeteerExtra.use(StealthPlugin());
+// 【診断用】StealthPluginがログインボタンのクリックに干渉している可能性を
+// 切り分けるため、環境変数で無効化できるようにしている。
+// Renderの環境変数 SALONBOARD_DISABLE_STEALTH を 'true' にすると無効化される。
+// 通常運用時は未設定のままでOK(StealthPluginは有効のまま)。
+const stealthDisabled = process.env.SALONBOARD_DISABLE_STEALTH === 'true';
+if (stealthDisabled) {
+  console.log('[診断モード] StealthPluginを無効化した状態で起動しています');
+} else {
+  puppeteerExtra.use(StealthPlugin());
+}
 const puppeteer = puppeteerExtra;
 const path = require('path');
 const fs = require('fs');
