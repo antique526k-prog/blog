@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "SalonBoard自動ログイン・投稿システム(自社利用限定)",
     "main": "server.js",
+  "engines": {
+    "node": "24.14.1"
+  },
   "scripts": {
         "start": "node server.js",
     "postinstall": "node install-fonts.js"
