@@ -77,6 +77,29 @@ async function saveDebugScreenshot(page, label) {
   }
 }
 
+// ===== SalonBoard自動化タスクの直列化キュー(アプリ全体で共有) =====
+// 【なぜ必要か】
+// 口コミ更新・ブログ投稿・投稿者一覧取得など、Puppeteerで実際にSalonBoardへ
+// アクセスする処理がこのファイル内に複数あるが、以前は口コミ機能(reviews.js)
+// にだけローカルなキューがあり、他の処理(投稿者一覧取得等)はキューを経由せず
+// 独自にPuppeteerブラウザを起動していた。その結果、複数の処理がほぼ同時に
+// 実行されて、Renderの小さいインスタンス上で複数のヘッドレスChromeが同時に
+// 立ち上がり、CPU不足でページ読み込みが詰まって ERR_TIMED_OUT になる事例が
+// 実際に確認された(2026/09/03)。
+// そのため、Puppeteerブラウザを起動するすべての処理(loginHQAndGetPage、
+// fetchStylistOptions、postBlogToSalonBoard を使う箇所)は、必ずこの
+// runSalonboardTask を経由すること。直接呼び出してはいけない。
+let salonboardTaskQueue = Promise.resolve();
+function runSalonboardTask(task) {
+  const result = salonboardTaskQueue.then(task, task);
+  // 前のタスクが失敗してもチェーンは止めず、次のタスクへ進む
+  salonboardTaskQueue = result.then(
+    () => {},
+    () => {}
+    );
+  return result;
+}
+
 // ===== ページが安定するまで待つ共通関数 =====
 async function waitForPageStable(page, maxRetries = 15, intervalMs = 1000) {
   let stableCount = 0;
@@ -970,5 +993,7 @@ module.exports = {
   fetchUnrepliedReviewSummaries,
   fetchReviewDetail,
   postReviewReply,
+  // ↓ Puppeteerタスク直列化キュー(アプリ全体で共有)
+  runSalonboardTask,
 };
 
