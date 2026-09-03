@@ -271,6 +271,25 @@ async function loginToSalonBoard(page, salonboardConfig) {
     // ログインボタン押下後の画面を毎回スクリーンショットに残す(目視デバッグ用)
     const afterLoginClickScreenshotUrl = await saveDebugScreenshot(page, 'after_login_click');
 
+    // 【重要】Chrome自体のネットワークエラー画面(ERR_TIMED_OUT等)になっていないか確認する。
+    // SalonBoard側のページに一切辿り着けなかった場合、URLもbodyTextの文言も
+    // 判定に使えないため見逃していた。Chromeの標準エラーページには
+    // 必ず #main-frame-error という要素があるので、これで検知する。
+    const isNetworkErrorPage = await page
+    .evaluate(() => !!document.querySelector('#main-frame-error'))
+    .catch(() => false);
+
+    if (isNetworkErrorPage) {
+      const err = new Error(
+        `SalonBoardログイン時にネットワークエラーが発生し、ページを読み込めませんでした。` +
+        `SalonBoard側が一時的に応答していないか、アクセス制限をかけている可能性があります。` +
+        (afterLoginClickScreenshotUrl ? ` スクリーンショット: ${afterLoginClickScreenshotUrl}` : '')
+        );
+      err.isNetworkError = true; // 呼び出し側で認証エラーと区別できるようにフラグを立てる
+      err.screenshotUrl = afterLoginClickScreenshotUrl || null;
+      throw err; // このケースも他のパスワードを試しても無意味なので即座に投げる
+    }
+
 // ログイン後の状態を判定する
     const currentUrl = page.url();
     const isStillLoginPage = currentUrl.includes('/login_sp/');
