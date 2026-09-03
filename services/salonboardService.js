@@ -234,13 +234,34 @@ async function loginToSalonBoard(page, salonboardConfig) {
     await new Promise((resolve) => setTimeout(resolve, 2000));
     await waitForPageStable(page);
 
-    // ログイン成功の判定: URLがログインページから変わっているか
+// ログイン後の状態を判定する
     const currentUrl = page.url();
     const isStillLoginPage = currentUrl.includes('/login_sp/');
-    if (!isStillLoginPage) {
-      return true; // このパスワードでログイン成功
+
+    if (isStillLoginPage) {
+      // パスワード違い等でログインページに留まっている。次のパスワードで再試行。
+      continue;
     }
-    // 失敗した場合は次のパスワードで再試行する
+
+    // 【重要】URLがログインページから変わっただけでは「成功」と断定しない。
+    // SalonBoard側の認証エラー/ユーザエラー画面に飛ばされているケースがあり、
+    // このケースはパスワード違いとは別モノ(アカウント側のブロック/
+    // セッション不整合)なので区別して扱う。
+    const bodyText = await page
+    .evaluate(() => (document.body ? document.body.innerText : ''))
+    .catch(() => '');
+    const isAuthErrorPage = /認証エラー|ユーザエラー|ログインしなおして/.test(bodyText);
+
+    if (isAuthErrorPage) {
+      const err = new Error(
+        `SalonBoardログイン後に認証エラー画面に遷移しました(URL: ${currentUrl})。` +
+        `パスワード誤りではなく、アカウント側のブロック/セッション不整合の可能性があります。`
+        );
+      err.isAuthBlock = true; // 呼び出し側でボット検知系エラーと区別できるようにフラグを立てる
+      throw err; // このケースは他のパスワードを試しても無意味なので即座に投げる
+    }
+
+    return true; // ログイン成功
   }
 
   return false; // 全パスワードで失敗
