@@ -1,0 +1,10 @@
+name: salonboard-network-test
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: curl salonboard.com
+        run: curl -v --max-time 15 https://salonboard.com/login_sp/ || true
