@@ -5,7 +5,9 @@
  * POST /api/reviews/:storeId/:reviewId/regenerate-draft
  *   AIドラフトを1件だけ作り直す
  * POST /api/reviews/:storeId/:reviewId/post
- *   スタッフが確認・編集した内容で実際にSalonBoardへ返信を投稿する
+ *   スタッフが確認・編集した返信内容を「承認済み」として記録する。
+ *   【変更】実際のSalonBoardへの投稿はここでは行わない。夜間バッチ
+ *   (services/nightlyBatchService.js)が1日1回まとめて投稿する。
  *
  * 【本部アカウントについて】
  * config/stores.js の店舗別ログイン(store.salonboard)とは別に、
@@ -23,16 +25,14 @@ const {
   getCachedUnrepliedReviewsAnyAge,
   updateReviewCache,
   updateReviewDraft,
-  removeReviewFromCache,
-  logReviewReply,
   getStaffProfileByLineUserId,
+  approveReviewReply,
 } = require('../services/sheetsService');
 const {
   loginHQAndGetPage,
   switchToStore,
   fetchUnrepliedReviewSummaries,
   fetchReviewDetail,
-  postReviewReply,
   runSalonboardTask,
 } = require('../services/salonboardService');
 const { generateReviewReplyDraft } = require('../services/geminiService');
@@ -51,8 +51,8 @@ function groupSalonId(store) {
   return (store.hotpepperSalonId || '').replace(/^sln/, '');
 }
 
-// 【重要】SalonBoardへのログインを伴う処理(refreshStoreReviews、postReviewReply
-// など)は、必ず salonboardService.js の runSalonboardTask を経由させること。
+// 【重要】SalonBoardへのログインを伴う処理(refreshStoreReviews等)は、
+// 必ず salonboardService.js の runSalonboardTask を経由させること。
 // 直接呼び出してはいけない。以前はこのファイル内だけのローカルキューだったが、
 // 投稿者一覧取得(routes/stylists.js)やブログ投稿(publishService.js)は
 // キューを経由せず独自にPuppeteerを起動していたため、複数のPuppeteerが
@@ -295,9 +295,19 @@ router.post('/:storeId/:reviewId/regenerate-draft', async (req, res) => {
   }
 });
 
+/**
+ * POST /api/reviews/:storeId/:reviewId/post
+ * 【変更】スタッフが確認・編集した返信内容を「承認済み」として記録するだけ。
+ * SalonBoardへの実際の投稿はここでは行わない
+ * (夜間バッチ services/nightlyBatchService.js が1日1回まとめて投稿する)。
+ *
+ * フロントエンド(reviews.html)側の挙動・レスポンス形式(即成功レスポンス→
+ * カードを「投稿済み」表示にする)は変更していないため、スタッフ側の
+ * 操作感は今までと変わらない。
+ */
 router.post('/:storeId/:reviewId/post', async (req, res) => {
   const { storeId, reviewId } = req.params;
-  const { staff, nickname, replyContent, replyFrom } = req.body;
+  const { staff, nickname, replyContent } = req.body;
 
   if (!replyContent || !replyContent.trim()) {
     return res.status(400).json({ success: false, error: '返信内容が空です' });
@@ -308,34 +318,20 @@ router.post('/:storeId/:reviewId/post', async (req, res) => {
       .json({ success: false, error: `返信内容が500字を超えています(${replyContent.length}字)` });
   }
 
-  // Puppeteer処理(ログイン〜投稿)は数十秒かかることがあるため、
-  // publish.js と同じく即座に受付レスポンスを返し、実処理はバックグラウンドで継続する。
-  res.json({ success: true, message: '投稿を受け付けました' });
+  try {
+    getStoreConfig(storeId); // 存在しない店舗IDならここで例外
 
-  (async () => {
-    let result = 'error';
-    try {
-              const store = getStoreConfig(storeId);
-              await runSalonboardTask(async () => {
-                          const { browser, page } = await loginHQAndGetPage(HQ_SALONBOARD_CONFIG);
-                          try {
-                                        await switchToStore(page, groupSalonId(store));
-                                        await postReviewReply(page, reviewId, { replyContent, replyFrom });
-                                        result = 'success';
-                          } finally {
-                                        await browser.close();
-                          }
-              });
-      await removeReviewFromCache(storeId, reviewId);
-      console.log(`口コミ投稿完了: store=${storeId}, reviewId=${reviewId}, staff=${staff}`);
-    } catch (err) {
-      console.error(`口コミ投稿エラー(store=${storeId}, reviewId=${reviewId}): ` + err.message);
-    } finally {
-      await logReviewReply({ storeId, reviewId, staff, nickname, replyContent, result }).catch((e) =>
-        console.error('ログ記録エラー: ' + e.message)
-      );
-    }
-  })();
+    await approveReviewReply(storeId, reviewId, {
+      replyContent: replyContent.trim(),
+      approvedBy: staff,
+    });
+
+    console.log(`口コミ返信を承認: store=${storeId}, reviewId=${reviewId}, staff=${staff}`);
+    res.json({ success: true, message: '承認しました。今夜の一括投稿で反映されます。' });
+  } catch (err) {
+    console.error(`口コミ承認エラー(store=${storeId}, reviewId=${reviewId}): ` + err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 module.exports = router;
