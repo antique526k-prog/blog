@@ -463,7 +463,7 @@ function renderCard(r) {
             '<div class="visit-date">' + escapeHtml(r.visitDate || '') + '</div>' +
             metaBadges +
             '</div>' +
-            '<div class="status-chip ' + (r.done ? 'done' : '') + '">' + (r.done ? '投稿済み' : '未返信') + '</div>' +
+            '<div class="status-chip ' + (r.done ? 'done' : '') + '">' + (r.done ? '承認済み' : '未返信') + '</div>' +
             '</div>' +
             renderScores(r.scores) +
             '<div class="review-body">' + escapeHtml(r.body || '(本文なし)') + '</div>' +
@@ -475,7 +475,7 @@ function renderCard(r) {
             '<button class="btn-ghost" data-action="regenerate" data-id="' + r.reviewId + '" ' +
             (r.done ? 'disabled' : '') + '>作り直す</button>' +
             '<button class="btn-primary" data-action="post" data-id="' + r.reviewId + '" ' +
-            (r.done ? 'disabled' : '') + '>' + (r.done ? '投稿済み' : '投稿する') + '</button>' +
+            (r.done ? 'disabled' : '') + '>' + (r.done ? '承認済み' : '投稿する') + '</button>' +
             '</div>' +
             '</div>'
           );
