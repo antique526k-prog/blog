@@ -9,6 +9,8 @@
  * - footer_master   : 店舗ごとのブログ本文フッター(PublishServiceで使用)
  * - publish_log     : GBP/WordPress投稿結果のログ
  * - stylist_cache    : SalonBoard投稿者一覧のキャッシュ(24時間有効)
+ * - review_cache     : 未返信口コミ+AIドラフト+承認状態のキャッシュ(店舗ごと)
+ * - review_reply_log : 実際に投稿した返信の記録(監査ログ)
  *
  * 【認証について】
  * サービスアカウントのJSONキーを使う。
@@ -231,11 +233,6 @@ async function updateStylistCache(storeId, stylists) {
 // ============================================
 
 /**
- * LINEユーザーIDから、そのユーザーが管理している店舗IDの一覧を取得する
- * @param {string} lineUserId
- * @returns {Promise<string[]>} 管理している店舗IDの配列(該当なしなら空配列)
- */
-/**
  * LINEユーザーIDから、そのユーザーが編集権限を持つ店舗IDの一覧を取得する。
  * 既存の「スタッフ」シート(利用者登録シート)を流用しており、
  * 新規のシートは作らない。
@@ -319,18 +316,20 @@ async function updateFooterText(storeId, newText) {
     });
   }
 }
-/**
- * ============================================
- * 【追加分】口コミ関連のキャッシュ・ログ
- * sheetsService.js の既存コード(getSpreadsheetDoc, getOrCreateSheet)を
- * そのまま再利用する前提。この内容を sheetsService.js の
- * module.exports の手前に貼り付けてください。
- *
- * 管理するシート(新規):
- * - review_cache     : 未返信口コミ+AIドラフトのキャッシュ(店舗ごと、TTL付き)
- * - review_reply_log : 実際に投稿した返信の記録(監査ログ)
- * ============================================
- */
+
+// ============================================
+// review_cache / review_reply_log
+//
+// 【夜間バッチ対応・変更点】
+// review_cache に以下の列を追加している(スプレッドシート側にも手動でヘッダーを
+// 追加しておくこと): status / approved_reply / approved_by / approved_at /
+// attempt_count / note
+//
+// status:
+//   '' (空)   … スタッフの対応待ち(通常の未返信口コミ)
+//   '承認済み' … スタッフが返信内容を確定済み。夜間バッチの投稿対象(失敗時もこのまま
+//               維持し、翌晩自動リトライされる)
+// ============================================
 
 const REVIEW_CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4時間。
 // 【変更履歴】以前は30分だったが、本部アカウントへのログイン頻度が高くなりすぎて
@@ -351,6 +350,12 @@ const REVIEW_CACHE_HEADERS = [
   'body',
   'ai_draft',
   'updated_at',
+  'status',
+  'approved_reply',
+  'approved_by',
+  'approved_at',
+  'attempt_count',
+  'note',
 ];
 
 const REVIEW_REPLY_LOG_HEADERS = [
@@ -365,7 +370,8 @@ const REVIEW_REPLY_LOG_HEADERS = [
 
 /**
  * 店舗の未返信口コミキャッシュを取得する。
- * 有効期限内(30分以内)ならキャッシュを返し、古い/存在しない場合は null を返す。
+ * 有効期限内(4時間以内)ならキャッシュを返し、古い/存在しない場合は null を返す。
+ * 「承認済み(投稿待ち)」の行はスタッフの一覧には出さないため除外する。
  * @param {string} storeId
  * @returns {Promise<Array<object>|null>}
  */
@@ -374,7 +380,9 @@ async function getCachedUnrepliedReviews(storeId) {
   const sheet = await getOrCreateSheet(doc, 'review_cache', REVIEW_CACHE_HEADERS);
   const rows = await sheet.getRows();
 
-  const storeRows = rows.filter((row) => row.get('store_id') === storeId);
+  const storeRows = rows.filter(
+    (row) => row.get('store_id') === storeId && row.get('status') !== '承認済み'
+  );
   if (storeRows.length === 0) return null;
 
   const latestUpdatedAt = storeRows
@@ -404,6 +412,11 @@ async function getCachedUnrepliedReviewsForStaff(storeId, staffName) {
 /**
  * 店舗の未返信口コミキャッシュを丸ごと更新する(スナップショット方式)。
  * 既存の当該店舗の行を削除してから、新しい内容で書き直す。
+ *
+ * 【重要】この関数は日中の自動更新(routes/reviews.js の queueBackgroundRefresh 等)と
+ * 夜間バッチの両方から呼ばれる。「承認済み(投稿待ち・リトライ待ち)」の行を
+ * 誤って消してしまわないよう、削除前に該当reviewIdの承認情報を退避し、
+ * 新しい行に引き継ぐ。
  * @param {string} storeId
  * @param {Array<object>} reviews [{reviewId, staff, nickname, visitDate, scores, body, aiDraft}]
  */
@@ -414,26 +427,51 @@ async function updateReviewCache(storeId, reviews) {
 
   // 対象店舗の既存行を削除(後ろから削除しないとインデックスがずれる)
   const storeRows = rows.filter((row) => row.get('store_id') === storeId);
+
+  // 承認済み(投稿待ち・リトライ待ち)の行は reviewId をキーに退避しておく
+  const preservedByReviewId = {};
+  storeRows.forEach((row) => {
+    if (row.get('status') === '承認済み') {
+      preservedByReviewId[row.get('review_id')] = {
+        status: row.get('status'),
+        approved_reply: row.get('approved_reply') || '',
+        approved_by: row.get('approved_by') || '',
+        approved_at: row.get('approved_at') || '',
+        attempt_count: row.get('attempt_count') || '',
+        note: row.get('note') || '',
+      };
+    }
+  });
+
   for (let i = storeRows.length - 1; i >= 0; i--) {
     await storeRows[i].delete();
   }
 
   const now = new Date().toISOString();
-  const newRows = reviews.map((r) => ({
-    store_id: storeId,
-    review_id: r.reviewId,
-    staff: r.staff || '',
-    nickname: r.nickname || '',
-    visit_date: r.visitDate || '',
-    score_atmosphere: r.scores?.['雰囲気'] ?? '',
-    score_service: r.scores?.['接客サービス'] ?? '',
-    score_skill: r.scores?.['技術・仕上がり'] ?? '',
-    score_price: r.scores?.['メニュー・料金'] ?? '',
-    score_overall: r.scores?.['総合満足度'] ?? '',
-    body: r.body || '',
-    ai_draft: r.aiDraft || '',
-    updated_at: now,
-  }));
+  const newRows = reviews.map((r) => {
+    const preserved = preservedByReviewId[r.reviewId];
+    return {
+      store_id: storeId,
+      review_id: r.reviewId,
+      staff: r.staff || '',
+      nickname: r.nickname || '',
+      visit_date: r.visitDate || '',
+      score_atmosphere: r.scores?.['雰囲気'] ?? '',
+      score_service: r.scores?.['接客サービス'] ?? '',
+      score_skill: r.scores?.['技術・仕上がり'] ?? '',
+      score_price: r.scores?.['メニュー・料金'] ?? '',
+      score_overall: r.scores?.['総合満足度'] ?? '',
+      body: r.body || '',
+      ai_draft: r.aiDraft || '',
+      updated_at: now,
+      status: preserved ? preserved.status : '',
+      approved_reply: preserved ? preserved.approved_reply : '',
+      approved_by: preserved ? preserved.approved_by : '',
+      approved_at: preserved ? preserved.approved_at : '',
+      attempt_count: preserved ? preserved.attempt_count : '',
+      note: preserved ? preserved.note : '',
+    };
+  });
 
   if (newRows.length > 0) {
     await sheet.addRows(newRows);
@@ -465,6 +503,7 @@ async function updateReviewDraft(storeId, reviewId, newDraft) {
 
 /**
  * 投稿完了した口コミをキャッシュから取り除く(次回一覧に出さないため)。
+ * 夜間バッチが実際にSalonBoardへの投稿に成功した後に呼ぶ。
  * @param {string} storeId
  * @param {string} reviewId
  */
@@ -481,7 +520,7 @@ async function removeReviewFromCache(storeId, reviewId) {
 
 /**
  * 投稿結果を監査ログに記録する。
- * @param {{storeId: string, reviewId: string, staff: string, nickname: string, replyContent: string, result: 'success'|'error'}} entry
+ * @param {{storeId: string, reviewId: string, staff: string, nickname: string, replyContent: string, result: 'approved'|'success'|'error'}} entry
  */
 async function logReviewReply(entry) {
   const doc = await getSpreadsheetDoc();
@@ -523,14 +562,6 @@ function numOrUndefined(v) {
 }
 
 /**
- * 【追加分】sheetsService.js に追加。module.exports の手前に貼り付け、
- * exportsに getStaffProfileByLineUserId を追加すること。
- *
- * 既存の「スタッフ」タブ(LINE userId | 氏名 | 店舗 | 登録日時 | 種別 | role)
- * から、LINE userIdに対応する氏名・店舗を引く。
- */
-
-/**
  * LINE userIdに対応する担当者情報を取得する。
  * @param {string} lineUserId
  * @returns {Promise<{staffName: string, storeId: string, role: string}|null>}
@@ -558,20 +589,8 @@ async function getStaffProfileByLineUserId(lineUserId) {
 }
 
 /**
- * 【追加分】sheetsService.js に追加。module.exports の手前に貼り付け、
- * exportsに getCachedUnrepliedReviewsAnyAge を追加すること。
- *
- * 既存の getCachedUnrepliedReviews は「30分以内でなければnullを返す」ため、
- * 呼び出し側はキャッシュが古いと必ずSalonBoardへの同期取得を待つことになり、
- * LIFF表示が遅くなる原因になっていた。
- *
- * この関数は鮮度に関わらずキャッシュをそのまま返し、isStaleフラグで
- * 「古いかどうか」だけを伝える。呼び出し側(routes/reviews.js)で
- * 「古くても一旦表示 → 裏で更新」のstale-while-revalidate方式に使う。
- */
-
-/**
  * 店舗の未返信口コミキャッシュを、鮮度に関わらず取得する。
+ * 「承認済み(投稿待ち)」の行はスタッフの一覧には出さないため除外する。
  * @param {string} storeId
  * @returns {Promise<{reviews: Array<object>, isStale: boolean}|null>} キャッシュが1件も無ければnull
  */
@@ -580,7 +599,9 @@ async function getCachedUnrepliedReviewsAnyAge(storeId) {
   const sheet = await getOrCreateSheet(doc, 'review_cache', REVIEW_CACHE_HEADERS);
   const rows = await sheet.getRows();
 
-  const storeRows = rows.filter((row) => row.get('store_id') === storeId);
+  const storeRows = rows.filter(
+    (row) => row.get('store_id') === storeId && row.get('status') !== '承認済み'
+  );
   if (storeRows.length === 0) return null;
 
   const latestUpdatedAt = storeRows
@@ -595,8 +616,76 @@ async function getCachedUnrepliedReviewsAnyAge(storeId) {
   };
 }
 
-// module.exports に追加すること: getCachedUnrepliedReviewsAnyAge,
-// module.exports に追加すること: getStaffProfileByLineUserId,
+/**
+ * スタッフが確定した返信内容を「承認済み」として記録する。
+ * 実際のSalonBoardへの投稿は夜間バッチが行う(この関数自体はSalonBoardへ一切アクセスしない)。
+ * @param {string} storeId
+ * @param {string} reviewId
+ * @param {{replyContent: string, approvedBy: string}} params
+ */
+async function approveReviewReply(storeId, reviewId, { replyContent, approvedBy }) {
+  const doc = await getSpreadsheetDoc();
+  const sheet = await getOrCreateSheet(doc, 'review_cache', REVIEW_CACHE_HEADERS);
+  const rows = await sheet.getRows();
+
+  const target = rows.find(
+    (row) => row.get('store_id') === storeId && row.get('review_id') === reviewId
+  );
+  if (!target) {
+    throw new Error(`review_cache に該当行が見つかりません: store=${storeId}, reviewId=${reviewId}`);
+  }
+
+  target.set('status', '承認済み');
+  target.set('approved_reply', replyContent);
+  target.set('approved_by', approvedBy || '');
+  target.set('approved_at', new Date().toISOString());
+  await target.save();
+}
+
+/**
+ * 「承認済み」ステータスの行を全店舗分取得する。夜間バッチが今夜投稿すべき返信をまとめて取得するのに使う。
+ * @returns {Promise<Array<{storeId: string, reviewId: string, staff: string, nickname: string, replyContent: string, attemptCount: number}>>}
+ */
+async function getApprovedReplies() {
+  const doc = await getSpreadsheetDoc();
+  const sheet = await getOrCreateSheet(doc, 'review_cache', REVIEW_CACHE_HEADERS);
+  const rows = await sheet.getRows();
+
+  return rows
+    .filter((row) => row.get('status') === '承認済み')
+    .map((row) => ({
+      storeId: row.get('store_id'),
+      reviewId: row.get('review_id'),
+      staff: row.get('staff'),
+      nickname: row.get('nickname'),
+      replyContent: row.get('approved_reply'),
+      attemptCount: Number(row.get('attempt_count') || 0),
+    }));
+}
+
+/**
+ * 夜間バッチでの投稿が失敗した場合に呼ぶ。statusは「承認済み」のまま維持し、
+ * 翌晩また自動的にリトライされる。
+ * @param {string} storeId
+ * @param {string} reviewId
+ * @param {string} errorMessage
+ */
+async function markApprovedReplyFailed(storeId, reviewId, errorMessage) {
+  const doc = await getSpreadsheetDoc();
+  const sheet = await getOrCreateSheet(doc, 'review_cache', REVIEW_CACHE_HEADERS);
+  const rows = await sheet.getRows();
+
+  const target = rows.find(
+    (row) => row.get('store_id') === storeId && row.get('review_id') === reviewId
+  );
+  if (!target) return; // 既に削除済み等は無視
+
+  const attempts = Number(target.get('attempt_count') || 0) + 1;
+  target.set('attempt_count', attempts);
+  target.set('note', `${new Date().toISOString()}: ${errorMessage}`);
+  await target.save();
+}
+
 module.exports = {
   getFooterText,
   logPublishResult,
@@ -606,11 +695,14 @@ module.exports = {
   getFooterTextForEdit,
   updateFooterText,
   getCachedUnrepliedReviews,
-    getCachedUnrepliedReviewsAnyAge,
+  getCachedUnrepliedReviewsAnyAge,
   getCachedUnrepliedReviewsForStaff,
   updateReviewCache,
   updateReviewDraft,
   removeReviewFromCache,
   logReviewReply,
   getStaffProfileByLineUserId,
+  approveReviewReply,
+  getApprovedReplies,
+  markApprovedReplyFailed,
 };
